@@ -1,10 +1,9 @@
 import os
 import subprocess
 import re
-import urllib.request
-import time
+import sys
 
-base_dir = r"c:\Users\imann\SynologyDrive\APP SCRIPT\EMPLOYE TRACKER"
+base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 modules = ["HOME_PORTAL", "MODUL_GATE_PABRIK", "MODUL_AREA_KERJA", "MODUL_REPORT"]
 
 urls = {}
@@ -46,21 +45,25 @@ for mod in modules[1:]:
 print("All Deployments Complete.")
 print("URLs:", urls)
 
-# 3. Hit HOME_PORTAL setupConfig to save to Google Sheets
+# 3. Update CONFIG_MODUL directly via Sheets API
 if home_url and all(urls.values()):
-    gate_param = urllib.parse.quote(urls["MODUL_GATE_PABRIK"])
-    area_param = urllib.parse.quote(urls["MODUL_AREA_KERJA"])
-    report_param = urllib.parse.quote(urls["MODUL_REPORT"])
-    
-    setup_url = f"{home_url}?action=setupConfig&gate={gate_param}&area={area_param}&report={report_param}"
-    print(f"Calling setup endpoint: {setup_url}")
-    
-    try:
-        req = urllib.request.Request(setup_url, headers={'User-Agent': 'Mozilla/5.0'})
-        res = urllib.request.urlopen(req)
-        res_body = res.read().decode('utf-8', errors='replace')
-        print("Setup completed successfully.")
-    except Exception as e:
-        print("Failed to call setup endpoint:", e)
+    update_script = os.path.join(base_dir, "scripts", "update_config_sheet.py")
+    result = subprocess.run(
+        [
+            sys.executable,
+            update_script,
+            "--gate-url", urls["MODUL_GATE_PABRIK"],
+            "--area-url", urls["MODUL_AREA_KERJA"],
+            "--report-url", urls["MODUL_REPORT"],
+        ],
+        cwd=base_dir,
+        shell=True,
+        capture_output=True,
+        text=True
+    )
+    print(result.stdout)
+    if result.returncode != 0:
+        print(result.stderr)
+        print("Failed to update CONFIG_MODUL.")
 else:
     print("Missing some URLs, skipping config injection.")

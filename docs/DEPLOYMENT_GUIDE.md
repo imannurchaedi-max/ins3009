@@ -35,11 +35,14 @@ Project ini sekarang memakai file runtime:
 - `python scripts/build_microservices.py`
   Menyalin source root ke module dan menjaga spesialisasi module tetap ada.
 - `python scripts/deploy_all.py`
-  Deploy semua module dan mencoba mengisi `CONFIG_MODUL`.
+  Deploy semua module dan mengisi `CONFIG_MODUL` lewat Google Sheets API lokal.
 - `python scripts/deploy_all_isolated.py`
   Alternatif deploy per module.
 - `python scripts/update_config_sheet.py`
   Update konfigurasi URL module pada sheet jika diperlukan.
+  Contoh:
+  `python scripts/update_config_sheet.py --gate-url <url> --area-url <url> --report-url <url>`
+  Helper ini akan mencoba Google Sheets API dulu, lalu fallback ke injector Apps Script sementara jika API belum aktif.
 
 ## Validasi Setelah Deploy
 
@@ -53,6 +56,6 @@ Project ini sekarang memakai file runtime:
 
 ## Catatan
 
-- `CONFIG_MODUL` tidak otomatis ter-update hanya karena source lokal berubah.
+- `CONFIG_MODUL` tidak otomatis ter-update hanya karena source lokal berubah, jadi jalankan helper update setelah deploy.
 - Perubahan lokal baru aktif di web app setelah `clasp push` dan deploy ulang.
 - Runtime aktif project ini memakai `Code.js`, bukan `Code.gs`.

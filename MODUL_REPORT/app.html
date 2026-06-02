@@ -1,9 +1,9 @@
-﻿<!-- html5-qrcode CDN -->
+<!-- html5-qrcode CDN -->
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 
 <div class="qr-overlay" id="qr-overlay" role="dialog" aria-modal="true" aria-labelledby="qr-title">
   <div class="qr-header">
-    <h3 id="qr-title">ðŸ“· Scan QR / Barcode</h3>
+    <h3 id="qr-title">Scan QR / Barcode</h3>
     <p>Arahkan kamera ke QR Code atau Barcode kartu MK / NIK</p>
   </div>
   <div class="qr-viewport">
@@ -12,13 +12,13 @@
   <div class="qr-result-text" id="qr-result-text"></div>
   <div class="qr-loading" id="qr-loading"></div>
   <div class="qr-diagnostic" id="qr-diagnostic"></div>
-  <button class="qr-close-btn" id="qr-close-btn" data-action="close-qr" type="button">âœ• TUTUP</button>
+  <button class="qr-close-btn" id="qr-close-btn" data-action="close-qr" type="button">TUTUP</button>
 </div>
 
 <div class="scan-toast" id="scan-toast" role="status" aria-live="polite"></div>
 
 <script>
-// â”€â”€ QR Scanner State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── QR Scanner State ──────────────────────────────────────
 const QR = {
   html5QrCode: null,
   stream: null,
@@ -33,7 +33,7 @@ const QR = {
   successHandled: false
 };
 
-// â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── State ──────────────────────────────────────────────────
 const STATE = {
   currentUser: null,
   masuk:    { selectedNIK: null, selectedNama: null, selectedType: null, selectedDept: null, selectedJabatan: null, scannedSerial: null, completed: false },
@@ -52,27 +52,110 @@ const REPORT_CACHE = {
   absen: null
 };
 
-// â”€â”€ AUTHENTICATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function getIncomingSessionNik() {
+  if (typeof GLOBAL_SESSION_NIK === 'undefined') return '';
+  return String(GLOBAL_SESSION_NIK || '').trim();
+}
 
-// Session Auto-Login (From Token)
-document.addEventListener('DOMContentLoaded', function() {
-  const sessionNik = (typeof GLOBAL_SESSION_NIK !== 'undefined') ? GLOBAL_SESSION_NIK : '';
-  if (!sessionNik) {
-    showScanToast('Akses modul harus melalui Home Portal.');
+function setLoginUiMode(mode, message) {
+  const loginPage = document.getElementById('page-login');
+  const loginForm = document.getElementById('login-form-content');
+  const sessionBootstrap = document.getElementById('session-bootstrap');
+  if (!loginPage || !loginForm || !sessionBootstrap) return;
+
+  if (mode === 'bootstrapping') {
+    loginPage.style.display = 'flex';
+    loginPage.classList.add('active');
+    loginForm.style.display = 'none';
+    sessionBootstrap.style.display = 'block';
+    sessionBootstrap.textContent = message || 'Memuat sesi dari Home Portal...';
     return;
   }
 
+  sessionBootstrap.style.display = 'none';
+  loginForm.style.display = 'block';
+  loginPage.style.display = 'flex';
+  loginPage.classList.add('active');
+}
+
+function hydrateAuthenticatedUser(user, depts) {
+  STATE.currentUser = user;
+  if (Array.isArray(depts) && depts.length) STATE.availableDepts = depts;
+
+  localStorage.setItem('dam_session', JSON.stringify(user));
+
+  const deptSelect = document.getElementById('security-dept');
+  if (deptSelect && STATE.availableDepts.length) {
+    deptSelect.innerHTML = '<option value="">-- Pilih Departemen --</option>';
+    STATE.availableDepts.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d;
+      opt.textContent = d;
+      deptSelect.appendChild(opt);
+    });
+  }
+
+  STATE.masuk.selectedNIK = user.nik;
+  STATE.masuk.selectedNama = user.nama;
+  STATE.masuk.selectedType = user.type;
+  STATE.masuk.selectedDept = user.dept;
+  STATE.masuk.selectedJabatan = user.jabatan;
+  STATE.masuk.completed = false;
+
+  const inNik = document.getElementById('masuk-nik');
+  const inNama = document.getElementById('masuk-nama-input');
+  if (inNik) inNik.value = user.nik;
+  if (inNama) inNama.value = user.nama;
+
+  applyRolePermissions(user.role);
+  updateMasukScannerVisibility();
+}
+
+function restoreSavedSession() {
+  const savedSession = localStorage.getItem('dam_session');
+  if (!savedSession) return false;
+
+  try {
+    const user = JSON.parse(savedSession);
+    hydrateAuthenticatedUser(user, STATE.availableDepts);
+    return true;
+  } catch (e) {
+    localStorage.removeItem('dam_session');
+    return false;
+  }
+}
+
+function beginModuleAutoLogin(sessionNik) {
+  const nik = (sessionNik || getIncomingSessionNik()).trim();
+  if (!nik) return false;
+
+  STATE.authBootPending = true;
+  setLoginUiMode('bootstrapping', 'Memuat sesi dari Home Portal...');
+
   google.script.run
-    .withFailureHandler(err => showScanToast('Gagal memverifikasi sesi: ' + getErrorMessage(err)))
-    .withSuccessHandler(res => {
-      if (res.ok) {
-        applyAuthenticatedSession(res);
-      } else {
-        showScanToast(res.msg || 'Sesi tidak valid.');
+    .withFailureHandler(err => {
+      STATE.authBootPending = false;
+      if (!restoreSavedSession()) {
+        setLoginUiMode('login');
+        showScanToast('Gagal memverifikasi sesi: ' + getErrorMessage(err));
       }
     })
-    .verifySession(sessionNik);
-});function applyRolePermissions(role) {
+    .withSuccessHandler(res => {
+      STATE.authBootPending = false;
+      if (res && res.ok) {
+        applyAuthenticatedSession(res);
+      } else if (!restoreSavedSession()) {
+        setLoginUiMode('login');
+        showScanToast((res && res.msg) || 'Sesi tidak valid.');
+      }
+    })
+    .verifySession(nik);
+
+  return true;
+}
+
+// ── AUTHENTICATION ─────────────────────────────────────────
+function applyRolePermissions(role) {
   const TABS = {
     'masuk': ['ADMINISTRATOR', 'SECURITY', 'KARYAWAN'],
     'keluar': ['ADMINISTRATOR', 'SECURITY', 'KARYAWAN'],
@@ -162,39 +245,10 @@ function handleLoginSubmit() {
 }
 
 function applyAuthenticatedSession(res) {
-  STATE.currentUser = res.karyawan;
-  if (res.depts) STATE.availableDepts = res.depts;
-
-  localStorage.setItem('dam_session', JSON.stringify(res.karyawan));
-
-  const deptSelect = document.getElementById('security-dept');
-  if (deptSelect && res.depts) {
-    deptSelect.innerHTML = '<option value="">-- Pilih Departemen --</option>';
-    res.depts.forEach(d => {
-      const opt = document.createElement('option');
-      opt.value = d;
-      opt.textContent = d;
-      deptSelect.appendChild(opt);
-    });
-  }
-
-  STATE.masuk.selectedNIK = res.karyawan.nik;
-  STATE.masuk.selectedNama = res.karyawan.nama;
-  STATE.masuk.selectedType = res.karyawan.type;
-  STATE.masuk.selectedDept = res.karyawan.dept;
-  STATE.masuk.selectedJabatan = res.karyawan.jabatan;
-  STATE.masuk.completed = false;
-
-  const inNik = document.getElementById('masuk-nik');
-  const inNama = document.getElementById('masuk-nama-input');
-  if (inNik) inNik.value = res.karyawan.nik;
-  if (inNama) inNama.value = res.karyawan.nama;
-
-  applyRolePermissions(res.karyawan.role);
-  updateMasukScannerVisibility();
+  hydrateAuthenticatedUser(res.karyawan, res.depts);
 }
 
-// â”€â”€ Tab switching â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Tab switching ──────────────────────────────────────────
 async function switchTab(tab) {
   const tabbar = document.getElementById('app-tabbar');
   const overlay = document.getElementById('sidebar-overlay');
@@ -221,7 +275,7 @@ async function switchTab(tab) {
   if (tab === 'security')  loadRecentLogs();
 }
 
-// â”€â”€ Debounce search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Debounce search ────────────────────────────────────────
 let searchTimer = null;
 function debounceSearch(q, context) {
   clearTimeout(searchTimer);
@@ -250,7 +304,7 @@ function renderList(res, context) {
     item.className = 'autocomplete-item';
     name.textContent = k.nama || '-';
     detail.className = 'item-nik';
-    detail.textContent = `${k.nik || '-'} Â· ${k.dept || '-'} Â· ${k.jabatan || '-'}`;
+    detail.textContent = `${k.nik || '-'} - ${k.dept || '-'} - ${k.jabatan || '-'}`;
     item.addEventListener('click', () => selectKaryawan(context, k.nik || '', k.nama || '', k.type || '', k.dept || '', k.jabatan || ''));
     item.appendChild(name);
     item.appendChild(detail);
@@ -284,7 +338,7 @@ function selectKaryawan(context, nik, nama, type, dept, jabatan) {
   if (info) {
     document.getElementById(context + '-avatar').textContent = nama.charAt(0);
     document.getElementById(context + '-nama').textContent   = nama;
-    document.getElementById(context + '-detail').textContent = nik + ' Â· ' + dept + ' Â· ' + jabatan;
+    document.getElementById(context + '-detail').textContent = nik + ' - ' + dept + ' - ' + jabatan;
     document.getElementById(context + '-type').textContent   = type || 'KARYAWAN';
     info.style.display = 'block';
   }
@@ -292,7 +346,7 @@ function selectKaryawan(context, nik, nama, type, dept, jabatan) {
   updateMasukScannerVisibility();
 }
 
-// â”€â”€ Manual serial submit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Manual serial submit ────────────────────────────────────
 function submitSerial(context) {
   const val = normalizeSerial(document.getElementById(context + '-serial').value);
   if (!val) { showResult(context, 'error', 'Masukkan nomor kartu MK / NIK terlebih dahulu.'); return; }
@@ -300,7 +354,7 @@ function submitSerial(context) {
   onSerialScanned(context, val);
 }
 
-// â”€â”€ On serial received (NFC or manual) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── On serial received (NFC or manual) ────────────────────
 function onSerialScanned(context, serial) {
   serial = normalizeSerial(serial);
   if (!isValidSerial(serial)) {
@@ -324,7 +378,7 @@ function onSerialScanned(context, serial) {
     if (REQUEST_BUSY.keluarScan) return;
     REQUEST_BUSY.keluarScan = true;
     STATE.keluar.scannedSerial = serial;
-    showResult('keluar', 'warning', 'â³ Memeriksa kartu...');
+    showResult('keluar', 'warning', 'Memeriksa kartu...');
     google.script.run
       .withFailureHandler(err => {
         REQUEST_BUSY.keluarScan = false;
@@ -350,7 +404,7 @@ function onSerialScanned(context, serial) {
     if (REQUEST_BUSY.securityScan) return;
     REQUEST_BUSY.securityScan = true;
     STATE.security.scannedSerial = serial;
-    showResult('security', 'warning', 'â³ Mencatat...');
+    showResult('security', 'warning', 'Mencatat...');
     google.script.run
       .withFailureHandler(err => {
         REQUEST_BUSY.securityScan = false;
@@ -361,7 +415,7 @@ function onSerialScanned(context, serial) {
   }
 }
 
-// â”€â”€ MASUK: Check ready & confirm â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── MASUK: Check ready & confirm ───────────────────────────
 function isExternalUser(type, jabatan, dept) {
   const marker = [type, jabatan, dept].join(' ').toUpperCase();
   return ['MITRA', 'VISITOR', 'TAMU', 'EXTERNAL', 'EKSTERNAL', 'VENDOR', 'KONTRAKTOR', 'OUTSOURCE', 'OUTSOURCING']
@@ -407,7 +461,7 @@ function confirmMasuk() {
 
   REQUEST_BUSY.masukConfirm = true;
   setActionBusy('confirm-masuk', true);
-  showResult('masuk', 'warning', 'â³ Memproses...');
+  showResult('masuk', 'warning', 'Memproses...');
   document.getElementById('masuk-confirm').classList.remove('visible');
 
   google.script.run
@@ -422,11 +476,11 @@ function confirmMasuk() {
       setActionBusy('confirm-masuk', false);
       if (res.ok) {
         showResult('masuk', 'success',
-          `âœ… <strong>${escHtml(res.karyawan.nama)}</strong> berhasil masuk pabrik.<br>
-           <span class="meta">Kartu: ${escHtml(res.noKartuMK)} Â· ${escHtml(res.waktu)} Â· ${escHtml(res.shift)}</span>`);
+          `<strong>${escHtml(res.karyawan.nama)}</strong> berhasil masuk pabrik.<br>
+           <span class="meta">Kartu: ${escHtml(res.noKartuMK)} - ${escHtml(res.waktu)} - ${escHtml(res.shift)}</span>`);
         resetMasuk();
       } else {
-        showResult('masuk', 'error', 'âŒ ' + escHtml(res.msg));
+        showResult('masuk', 'error', escHtml(res.msg));
         document.getElementById('masuk-confirm').classList.add('visible');
       }
     })
@@ -461,11 +515,11 @@ function resetKeluarUi() {
   if (lokerIn) lokerIn.value = '';
 }
 
-// â”€â”€ KELUAR: Handle scan & confirm â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── KELUAR: Handle scan & confirm ──────────────────────────
 function handleKeluarScan(res, serial) {
   REQUEST_BUSY.keluarScan = false;
   if (!res.ok) {
-    showResult('keluar', 'error', 'âŒ ' + escHtml(res.msg));
+    showResult('keluar', 'error', escHtml(res.msg));
     const serialInput = document.getElementById('keluar-serial');
     if (serialInput) serialInput.value = '';
     STATE.keluar.scannedSerial = null;
@@ -474,7 +528,7 @@ function handleKeluarScan(res, serial) {
     return;
   }
   if (res.status !== 'BOUND') {
-    showResult('keluar', 'error', `âŒ Kartu <strong>${escHtml(serial)}</strong> tidak dalam status terikat / tidak dikenal.`);
+    showResult('keluar', 'error', `Kartu <strong>${escHtml(serial)}</strong> tidak dalam status terikat / tidak dikenal.`);
     const serialInput = document.getElementById('keluar-serial');
     if (serialInput) serialInput.value = '';
     STATE.keluar.scannedSerial = null;
@@ -486,13 +540,13 @@ function handleKeluarScan(res, serial) {
   STATE.keluar.bindingData = res;
 
   showResult('keluar', 'warning',
-    `âš ï¸ Kartu <strong>${escHtml(serial)}</strong> terikat ke <strong>${escHtml(res.nama)}</strong>.<br>
-     <span class="meta">NIK: ${escHtml(res.nik)} Â· ${escHtml(res.dept)} Â· Terikat sejak: ${escHtml(res.waktuBind)}</span><br><br>
+    `Kartu <strong>${escHtml(serial)}</strong> terikat ke <strong>${escHtml(res.nama)}</strong>.<br>
+     <span class="meta">NIK: ${escHtml(res.nik)} - ${escHtml(res.dept)} - Terikat sejak: ${escHtml(res.waktuBind)}</span><br><br>
      Konfirmasi jika karyawan ini akan pulang.`);
 
   document.getElementById('keluar-avatar').textContent  = res.nama.charAt(0);
   document.getElementById('keluar-nama').textContent    = res.nama;
-  document.getElementById('keluar-detail').textContent  = res.nik + ' Â· ' + res.dept;
+  document.getElementById('keluar-detail').textContent  = res.nik + ' - ' + res.dept;
 
   document.getElementById('keluar-confirm').classList.add('visible');
 }
@@ -506,7 +560,7 @@ function confirmKeluar() {
   
   REQUEST_BUSY.keluarConfirm = true;
   setActionBusy('confirm-keluar', true);
-  showResult('keluar', 'warning', 'â³ Memproses...');
+  showResult('keluar', 'warning', 'Memproses...');
   document.getElementById('keluar-confirm').classList.remove('visible');
 
   google.script.run
@@ -521,42 +575,42 @@ function confirmKeluar() {
       setActionBusy('confirm-keluar', false);
       if (res.ok) {
         showResult('keluar', 'success',
-          `ðŸšª <strong>${escHtml(res.karyawan.nama)}</strong> telah keluar pabrik.<br>
-           <span class="meta">Kartu ${escHtml(res.noKartuMK)} telah dilepas Â· ${escHtml(res.waktu)}</span>`);
+          `<strong>${escHtml(res.karyawan.nama)}</strong> telah keluar pabrik.<br>
+           <span class="meta">Kartu ${escHtml(res.noKartuMK)} telah dilepas - ${escHtml(res.waktu)}</span>`);
         STATE.keluar = { scannedSerial:null, bindingData:null };
         document.getElementById('keluar-serial').value = '';
         resetKeluarUi();
       } else {
-        showResult('keluar', 'error', 'âŒ ' + escHtml(res.msg));
+        showResult('keluar', 'error', escHtml(res.msg));
         document.getElementById('keluar-confirm').classList.add('visible');
       }
     })
     .releaseKartu(serial, loker);
 }
 
-// â”€â”€ SECURITY: Handle scan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── SECURITY: Handle scan ──────────────────────────────────
 function handleSecurityScan(res) {
   REQUEST_BUSY.securityScan = false;
   if (!res.ok) {
-    showResult('security', 'error', `âŒ ${escHtml(res.msg)}`);
+    showResult('security', 'error', escHtml(res.msg));
     const serialInput = document.getElementById('security-serial');
     if (serialInput) serialInput.value = '';
     STATE.security.scannedSerial = null;
   } else {
-    const icon  = res.inout === 'IN' ? 'ðŸŸ¢' : 'ðŸŸ¡';
+    const statusLabel = res.inout === 'IN' ? 'MASUK' : 'KELUAR';
     const color = res.inout === 'IN' ? 'success' : 'warning';
     showResult('security', color,
-      `${icon} <strong>${escHtml(res.karyawan.nama)}</strong><br>
-       <span class="meta">${escHtml(res.karyawan.nik)} Â· ${escHtml(res.karyawan.dept)} Â· ${escHtml(res.karyawan.jabatan)}</span><br>
-       <span class="meta">Kartu: ${escHtml(res.noKartuMK)} Â· ${escHtml(res.waktu)}</span><br>
-       <strong style="font-size:16px">${res.inout === 'IN' ? 'âœ… MASUK Area Kerja' : 'ðŸšª KELUAR Area Kerja'}</strong>`);
+      `<strong>${escHtml(res.karyawan.nama)}</strong><br>
+       <span class="meta">${escHtml(res.karyawan.nik)} - ${escHtml(res.karyawan.dept)} - ${escHtml(res.karyawan.jabatan)}</span><br>
+       <span class="meta">Kartu: ${escHtml(res.noKartuMK)} - ${escHtml(res.waktu)}</span><br>
+       <strong style="font-size:16px">${statusLabel} Area Kerja</strong>`);
     document.getElementById('security-serial').value = '';
     STATE.security.scannedSerial = null;
     setTimeout(loadRecentLogs, 800);
   }
 }
 
-// â”€â”€ DASHBOARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── DASHBOARD ──────────────────────────────────────────────
 function loadDashboard() {
   document.getElementById('db-bound').textContent      = '...';
   document.getElementById('db-log-today').textContent  = '...';
@@ -590,7 +644,7 @@ function loadDashboard() {
           </div>
           <div class="log-info">
             <strong>${escHtml(k.nama)}</strong>
-            <span>${k.nik} Â· ${escHtml(k.dept)} Â· Kartu: ${k.noKartuMK}</span>
+            <span>${k.nik} - ${escHtml(k.dept)} - Kartu: ${k.noKartuMK}</span>
           </div>
           <div class="log-time">${k.waktuBind ? k.waktuBind.split(' ')[1] || '' : ''}</div>
         </div>`).join('');
@@ -598,7 +652,7 @@ function loadDashboard() {
     .getDashboardData();
 }
 
-// â”€â”€ RECENT LOGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── RECENT LOGS ────────────────────────────────────────────
 function loadRecentLogs() {
   google.script.run
     .withFailureHandler(err => {
@@ -618,11 +672,11 @@ function loadRecentLogs() {
       el.innerHTML = res.data.map(l => `
         <div class="log-item">
           <div class="log-dot ${l.inout === 'IN' ? 'in' : 'out'}">
-            ${l.inout === 'IN' ? 'ðŸŸ¢' : 'ðŸŸ¡'}
+            ${l.inout === 'IN' ? 'IN' : 'OUT'}
           </div>
           <div class="log-info">
             <strong>${escHtml(l.nama)}</strong>
-            <span>${l.noKartuMK} Â· ${l.nik}</span>
+            <span>${l.noKartuMK} - ${l.nik}</span>
           </div>
           <div class="log-time">${l.jam}<br><span style="font-size:10px">${l.tanggal}</span></div>
         </div>`).join('');
@@ -630,7 +684,7 @@ function loadRecentLogs() {
     .getRecentAreaLogs(20);
 }
 
-// â”€â”€ HELPERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── HELPERS ────────────────────────────────────────────────
 function updatePeriodInput(target) {
   const typeEl = document.getElementById(target + '-period-type');
   const valueEl = document.getElementById(target + '-period-value');
@@ -699,7 +753,7 @@ function renderAbsenReport(res) {
   }
   REPORT_CACHE.absen = res;
   if (exportBtn) exportBtn.disabled = !res.data.length;
-  showResult('cek-absen', 'success', `Periode ${escHtml(res.period)} Â· ${res.total} catatan`);
+  showResult('cek-absen', 'success', `Periode ${escHtml(res.period)} - ${res.total} catatan`);
   
   const role = STATE.currentUser ? STATE.currentUser.role : 'KARYAWAN';
   const isKaryawan = role === 'KARYAWAN' || role === 'Karyawan';
@@ -846,7 +900,7 @@ function renderAreaReport(res) {
     if(rekapList) rekapList.innerHTML = '';
     return;
   }
-  showResult('cek-area', 'success', `Periode ${escHtml(res.period)} Â· ${res.total} catatan`);
+  showResult('cek-area', 'success', `Periode ${escHtml(res.period)} - ${res.total} catatan`);
   
   // 1. RENDER LOG TIMESTAMP
   list.innerHTML = `
@@ -862,8 +916,8 @@ function renderAreaReport(res) {
         <div class="report-date">${escHtml(row.tanggal)}<br><span>${escHtml(row.jam)}</span></div>
         <div class="report-main">
           <strong>${row.inout === 'IN' ? 'MASUK Area Kerja' : 'KELUAR Area Kerja'}</strong>
-          <span>${escHtml(row.nama || row.nik)} Â· ${escHtml(row.nik)}</span>
-          <span>${escHtml(row.dept || '-')} Â· ${escHtml(row.jabatan || '-')}</span>
+          <span>${escHtml(row.nama || row.nik)} - ${escHtml(row.nik)}</span>
+          <span>${escHtml(row.dept || '-')} - ${escHtml(row.jabatan || '-')}</span>
           <div class="time-pair">
             <span class="time-pill ${row.inout === 'OUT' ? 'out' : ''}">${escHtml(row.inout)}</span>
             <span class="time-pill">Kartu ${escHtml(row.noKartuMK || '-')}</span>
@@ -1212,7 +1266,7 @@ async function stopQRScanner() {
   // Empty dummy function to satisfy await stopQRScanner() in switchTab.
 }
 
-// â”€â”€ DIRECT FILE QR SCANNER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── DIRECT FILE QR SCANNER ─────────────────────────────────
 
 async function processQRImage(event, context) {
   const file = event.target.files && event.target.files[0];
@@ -1223,7 +1277,7 @@ async function processQRImage(event, context) {
   resetSerialInput(context);
   if (resultContainer) {
     resultContainer.className = 'result-card warning';
-    resultContainer.innerHTML = '<strong>â³ Sedang menganalisis foto...</strong>';
+    resultContainer.innerHTML = '<strong>Sedang menganalisis foto...</strong>';
     resultContainer.style.display = 'block';
   }
 
@@ -1282,7 +1336,7 @@ async function processQRImage(event, context) {
     document.getElementById(context + '-serial').value = serial;
     if (resultContainer) {
       resultContainer.className = 'result-card';
-      resultContainer.innerHTML = 'âœ… Ditemukan: ' + serial;
+      resultContainer.innerHTML = 'Ditemukan: ' + serial;
     }
     
     onSerialScanned(context, serial);
@@ -1291,12 +1345,12 @@ async function processQRImage(event, context) {
     event.target.value = '';
     if (resultContainer) {
       resultContainer.className = 'result-card error';
-      resultContainer.innerHTML = '<strong>Gagal:</strong> Barcode tidak terbaca dari foto (hindari silau/blur).<br><span style="color:#d9534f;font-weight:600;">ðŸ‘‰ Silakan ketik NIK / MK secara manual di kotak bawah lalu klik SCAN.</span>';
+      resultContainer.innerHTML = '<strong>Gagal:</strong> Barcode tidak terbaca dari foto (hindari silau/blur).<br><span style="color:#d9534f;font-weight:600;">Silakan ketik NIK / MK secara manual di kotak bawah lalu klik SCAN.</span>';
     }
   }
 }
 
-// â”€â”€ Init â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Init ───────────────────────────────────────────────────
 function bindUiEvents() {
   const logo = document.getElementById('dam-logo');
   if (logo) logo.addEventListener('error', () => { logo.style.display = 'none'; });
@@ -1387,32 +1441,28 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el) { el.className = 'result-card'; el.innerHTML = ''; }
   });
   // Reset masuk state
-  STATE.masuk = { selectedNIK:null, selectedNama:null, selectedDept:null, selectedJabatan:null, scannedSerial:null };
+  STATE.masuk = {
+    selectedNIK: null,
+    selectedNama: null,
+    selectedType: null,
+    selectedDept: null,
+    selectedJabatan: null,
+    scannedSerial: null,
+    completed: false
+  };
   STATE.keluar = { scannedSerial:null, bindingData:null };
   STATE.security = { scannedSerial:null };
+  STATE.authBootPending = false;
   loadRecentLogs();
 
-  const savedSession = localStorage.getItem('dam_session');
-  if (savedSession) {
-    try {
-      const user = JSON.parse(savedSession);
-      STATE.currentUser = user;
-      STATE.masuk.selectedNIK = user.nik;
-      STATE.masuk.selectedNama = user.nama;
-      STATE.masuk.selectedDept = user.dept;
-      STATE.masuk.selectedJabatan = user.jabatan;
-      
-      const inNik = document.getElementById('masuk-nik');
-      const inNama = document.getElementById('masuk-nama-input');
-      if (inNik) inNik.value = user.nik;
-      if (inNama) inNama.value = user.nama;
-
-      applyRolePermissions(user.role);
-      updateMasukScannerVisibility();
-    } catch (e) {
-      localStorage.removeItem('dam_session');
-    }
+  const sessionNik = getIncomingSessionNik();
+  if (sessionNik) {
+    beginModuleAutoLogin(sessionNik);
+    return;
   }
+
+  setLoginUiMode('login');
+  restoreSavedSession();
 });
 
 window.addEventListener('pageshow', () => {
@@ -1437,8 +1487,7 @@ function handleLogout() {
   document.getElementById('app-tabbar').style.display = 'none';
   
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.getElementById('page-login').style.display = 'flex';
-  document.getElementById('page-login').classList.add('active');
+  setLoginUiMode('login');
   
   const loginNik = document.getElementById('login-nik');
   const loginPwd = document.getElementById('login-password');
@@ -1446,4 +1495,3 @@ function handleLogout() {
   if(loginPwd) loginPwd.value = '';
 }
 </script>
-

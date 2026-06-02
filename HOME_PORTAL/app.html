@@ -198,7 +198,7 @@ async function switchTab(tab) {
       else if (tab.includes('cek') || tab.includes('export')) targetUrl = urls.REPORT + token;
       
       if (targetUrl) {
-        window.open(targetUrl, '_blank');
+        window.location.href = targetUrl;
       } else {
         alert('URL Module belum dikonfigurasi!');
       }

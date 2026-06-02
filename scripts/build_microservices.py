@@ -17,30 +17,6 @@ MODULE_DO_GET = """function doGet(e) {
 }
 """
 
-MODULE_AUTO_LOGIN = """
-
-// Session Auto-Login (From Token)
-document.addEventListener('DOMContentLoaded', function() {
-  const sessionNik = (typeof GLOBAL_SESSION_NIK !== 'undefined') ? GLOBAL_SESSION_NIK : '';
-  if (!sessionNik) {
-    showScanToast('Akses modul harus melalui Home Portal.');
-    return;
-  }
-
-  google.script.run
-    .withFailureHandler(err => showScanToast('Gagal memverifikasi sesi: ' + getErrorMessage(err)))
-    .withSuccessHandler(res => {
-      if (res.ok) {
-        applyAuthenticatedSession(res);
-      } else {
-        showScanToast(res.msg || 'Sesi tidak valid.');
-      }
-    })
-    .verifySession(sessionNik);
-});
-"""
-
-
 def write_text(path, content):
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
@@ -69,8 +45,12 @@ def specialize_module_files(mod_dir):
 
     with open(app_path, "r", encoding="utf-8") as f:
         app = f.read()
-    if "Session Auto-Login (From Token)" not in app:
-        app = re.sub(r"(// .*AUTHENTICATION.*\n)", r"\1" + MODULE_AUTO_LOGIN, app, count=1)
+    app = re.sub(
+        r"\n// Session Auto-Login \(From Token\)[\s\S]*?\.verifySession\(sessionNik\);\n\}\);",
+        "",
+        app,
+        count=1
+    )
     write_text(app_path, app)
 
 # 1. Copy monolithic files to all modules (if not already there)
@@ -116,7 +96,7 @@ new_switch_tab = """async function switchTab(tab) {
       else if (tab.includes('cek') || tab.includes('export')) targetUrl = urls.REPORT + token;
       
       if (targetUrl) {
-        window.open(targetUrl, '_blank');
+        window.location.href = targetUrl;
       } else {
         alert('URL Module belum dikonfigurasi!');
       }

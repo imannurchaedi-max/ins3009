@@ -72,7 +72,7 @@ Pencatatan Area Kerja (*scanAreaKerja*) sepenuhnya mengandalkan tebakan sistem (
 - **Masalah/Risiko:** Di lapangan, karyawan sering menerobos tanpa scan. Jika mengandalkan *Auto-Toggle*, status masuk/keluar akan terbalik secara fatal dan Security tidak bisa memperbaikinya tanpa merusak rentetan berikutnya.
 - **Solusi Efektif:** 
   1. Menambahkan barisan *Chips Mode Scan* di UI Security: **AUTO, IN (Paksa Masuk), dan OUT (Paksa Keluar)**.
-  2. Menambahkan argumen `forceMode` ke backend `Code.gs`. Jika Security memilih IN, backend akan mengabaikan logika pencarian *last status* dan langsung memaksanya menjadi "IN".
+  2. Menambahkan argumen `forceMode` ke backend `Code.js`. Jika Security memilih IN, backend akan mengabaikan logika pencarian *last status* dan langsung memaksanya menjadi "IN".
   3. *Continuous Scan:* Memastikan fungsi `handleSecurityScan` langsung mengosongkan kotak *input barcode* setelah berhasil, sehingga Security dapat menembak banyak Karyawan sekaligus dengan cepat tanpa menyentuh layar.
 
 ## FASE 9: Sistem Rekapitulasi Area Cerdas (Client-Side Computing)
@@ -80,7 +80,7 @@ Pencatatan Area Kerja (*scanAreaKerja*) sepenuhnya mengandalkan tebakan sistem (
 Pengawas kesulitan menghitung seberapa sering anak buahnya keluar/masuk karena laporan hanya menyajikan riwayat detik demi detik secara memanjang (log mentah).
 - **Solusi Efektif & Arsitektur:**
   1. Membagi tampilan menjadi 2 Tab **(Nav Pills): Log Timestamp vs Rekap Hitungan**.
-  2. Alih-alih merombak backend `Code.gs` (yang dapat memakan kuota prosesor server Google), logika pengelompokan (*grouping*) dan kalkulasi frekuensi IN/OUT dibangun murni menggunakan **JavaScript Frontend** di dalam `app.html` (`renderAreaReport`).
+  2. Alih-alih merombak backend `Code.js` (yang dapat memakan kuota prosesor server Google), logika pengelompokan (*grouping*) dan kalkulasi frekuensi IN/OUT dibangun murni menggunakan **JavaScript Frontend** di dalam `app.html` (`renderAreaReport`).
   3. Browser klien (HP/Laptop Pengawas) langsung mengolah *array* log mentah, menghitung total *IN/OUT* per orang, lalu merendernya ke dalam Tabel Statistik *real-time*. Kecepatan memuat 1000% lebih efisien karena tanpa pemanggilan server tambahan!
 
 ---

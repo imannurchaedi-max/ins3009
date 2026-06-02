@@ -6,6 +6,7 @@ venv/
 # Generated audits and local artifacts
 reports/
 CONTEXT_SUMMARY.md
+_local/
 
 # Local editor and OS files
 .clinerules

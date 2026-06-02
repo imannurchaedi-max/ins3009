@@ -2,11 +2,11 @@
 
 ## Ringkasan
 
-Project ini adalah web app Google Apps Script untuk access control dan absensi karyawan berbasis kartu MK. Arsitekturnya terdiri dari backend GAS di `Code.gs`, UI shell di `Index.html`, logic frontend di `app.html`, styling di `style.html`, dan Google Sheets sebagai storage operasional.
+Project ini adalah web app Google Apps Script untuk access control dan absensi karyawan berbasis kartu MK. Arsitekturnya terdiri dari backend GAS di `Code.js`, UI shell di `Index.html`, logic frontend di `app.html`, styling di `style.html`, dan Google Sheets sebagai storage operasional.
 
 ## Komponen Utama
 
-- `Code.gs`
+- `Code.js`
   Menangani rendering web app, validasi sheet, lookup karyawan, binding kartu, log masuk/keluar, log area kerja, recap absen, dashboard, dan report.
 - `Index.html`
   Menyusun struktur halaman login, tab aplikasi, card laporan, dan include file `style` + `app`.
@@ -45,7 +45,7 @@ Project ini adalah web app Google Apps Script untuk access control dan absensi k
 - `ABSEN IN OUT MK`
   Recap harian hasil gabungan log masuk dan keluar.
 
-## Fungsi Backend `Code.gs`
+## Fungsi Backend `Code.js`
 
 ### Entry point dan include
 

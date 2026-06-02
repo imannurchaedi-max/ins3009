@@ -4,7 +4,7 @@ Current scope is full Google Apps Script.
 
 Audit dan perubahan harus fokus pada:
 
-- `Code.gs` sebagai backend GAS
+- `Code.js` sebagai backend GAS
 - `Index.html`, `app.html`, dan `style.html`
 - integrasi `google.script.run`
 - dependensi Google Sheets

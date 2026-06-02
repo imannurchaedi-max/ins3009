@@ -24,9 +24,9 @@ def audit_security():
                 )
 
     # 2. Analisa Backend Loopholes
-    code_gs_path = "Code.gs"
-    if os.path.exists(code_gs_path):
-        with open(code_gs_path, "r", encoding="utf-8") as f:
+    code_path = "Code.js" if os.path.exists("Code.js") else "Code.gs"
+    if os.path.exists(code_path):
+        with open(code_path, "r", encoding="utf-8") as f:
             code_gs = f.read()
             
             # Cek validasi Auth/Sesi

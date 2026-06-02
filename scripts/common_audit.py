@@ -28,6 +28,7 @@ SKIP_DIRS = {
     "reports",
     "skills",
     "venv",
+    "_local",
 }
 
 SKIP_FILES = {

@@ -1,4 +1,4 @@
-﻿// ============================================================
+// ============================================================
 //  NFC DAM ACCESS CONTROL SYSTEM
 //  PT Daya Anugrah Mulya
 //  Google Apps Script - Backend
@@ -36,7 +36,7 @@ function doGet(e) {
   template.sessionNik = (e && e.parameter && e.parameter.nik) ? e.parameter.nik : '';
   return template
     .evaluate()
-    .setTitle('DAM Access - Module')
+    .setTitle('DAM Access Control')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
@@ -83,7 +83,21 @@ function ensureHeader(sheet, headers) {
   }
 
   const range = sheet.getRange(1, 1, 1, headers.length);
-  const existing = range.getValues()[0].map(asText);
+  let existing = range.getValues()[0].map(asText);
+  const writable = [];
+
+  headers.forEach(function(header, index) {
+    const current = existing[index];
+    if (!normalizeHeader(current) && header) {
+      writable.push({ col: index + 1, value: header });
+      existing[index] = header;
+    }
+  });
+
+  writable.forEach(function(item) {
+    sheet.getRange(1, item.col).setValue(item.value);
+  });
+
   const mismatches = [];
   headers.forEach(function(header, index) {
     if (normalizeHeader(existing[index]) !== normalizeHeader(header)) {
@@ -1065,4 +1079,3 @@ function getRecentAreaLogs(limit) {
     return { ok: false, msg: e.message };
   }
 }
-

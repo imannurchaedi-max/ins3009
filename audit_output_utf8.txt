@@ -1,0 +1,181 @@
+﻿================================================================================
+SPEED_MESIN CODE ANALYZER - PHP AST EXTRACTION
+================================================================================
+
+­ƒôü FILE ANALYSIS SUMMARY
+
+--------------------------------------------------------------------------------
+
+­ƒÄ» config.php
+   Functions (0): None
+   Classes: None
+   Includes: None
+   DB Queries: 0 found
+
+­ƒÄ» functions.php
+   Functions (9): getTargetOutput, getOEEPercentage, getStopSpeedThreshold, isMachineStopped, getShiftID, getShiftData, getCurrentShiftScope, apiError, apiSuccess
+   Classes: None
+   Includes: None
+   DB Queries: 0 found
+   ­ƒîÉ API: ['JSON API detected']
+
+­ƒÄ» data.php
+   Functions (2): calculateDowntimeMinutes, calculateStopEvents
+   Classes: None
+   Includes: config.php, functions.php
+   DB Queries: 0 found
+   ÔÜá´©Å  Security: ['Potential XSS - unescaped user input']
+   ­ƒîÉ API: ['JSON API detected']
+
+­ƒÄ» speed.php
+   Functions (9): createChart, escapeHtml, updateDowntimePanel, applyPreset, toggleAllMachines, onMachineToggle, startAnalysis, resetAnalysis, updateData
+   Classes: None
+   Includes: header.php, footer.php
+   DB Queries: 2 found
+
+­ƒÄ» settings.php
+   Functions (3): saveVariant, updateSchedSkuList, deployScheduled
+   Classes: None
+   Includes: header.php, config.php, functions.php, footer.php
+   DB Queries: 0 found
+   ­ƒîÉ API: ['JSON API detected']
+
+­ƒÄ» oee.php
+   Functions (5): loadOEEData, renderCards, filterData, renderPagination, openEditModal
+   Classes: None
+   Includes: header.php, footer.php
+   DB Queries: 0 found
+   ­ƒîÉ API: ['JSON API detected']
+
+­ƒÄ» index.php
+   Functions (1): updateDashboard
+   Classes: None
+   Includes: header.php, footer.php
+   DB Queries: 1 found
+
+­ƒÄ» login.php
+   Functions (0): None
+   Classes: None
+   Includes: config.php
+   DB Queries: 0 found
+   ÔÜá´©Å  Security: ['MD5 usage (insecure hashing)', 'Password stored with MD5', 'Potential XSS - unescaped user input', 'session_regenerate_id found (check if called after login)']
+
+­ƒÄ» logout.php
+   Functions (0): None
+   Classes: None
+   Includes: None
+   DB Queries: 0 found
+
+­ƒÄ» output.php
+   Functions (2): showOEE, sumByGroup
+   Classes: None
+   Includes: header.php, config.php, footer.php
+   DB Queries: 0 found
+
+­ƒÄ» header.php
+   Functions (3): updateClock, handleBrandText, toggleSidebar
+   Classes: None
+   Includes: functions.php
+   DB Queries: 0 found
+
+­ƒÄ» footer.php
+   Functions (0): None
+   Classes: None
+   Includes: None
+   DB Queries: 0 found
+
+­ƒÄ» update_sku.php
+   Functions (0): None
+   Classes: None
+   Includes: config.php, functions.php
+   DB Queries: 0 found
+   ÔÜá´©Å  Security: ['Potential XSS - unescaped user input']
+   ­ƒîÉ API: ['JSON API detected']
+
+­ƒÄ» update_variant.php
+   Functions (0): None
+   Classes: None
+   Includes: config.php, functions.php
+   DB Queries: 0 found
+   ÔÜá´©Å  Security: ['Potential XSS - unescaped user input']
+   ­ƒîÉ API: ['JSON API detected']
+
+­ƒÄ» get_oee_data.php
+   Functions (0): None
+   Classes: None
+   Includes: config.php, functions.php
+   DB Queries: 0 found
+   ÔÜá´©Å  Security: ['Potential XSS - unescaped user input']
+   ­ƒîÉ API: ['JSON API detected']
+
+­ƒÄ» export_oee.php
+   Functions (0): None
+   Classes: None
+   Includes: config.php, functions.php
+   DB Queries: 0 found
+
+­ƒÄ» tv_dashboard.php
+   Functions (3): showOEEBadge, init, refresh
+   Classes: None
+   Includes: header.php
+   DB Queries: 1 found
+
+================================================================================
+­ƒöù FUNCTION CROSS-REFERENCE INDEX
+================================================================================
+  apiError() ÔåÆ functions.php
+  apiSuccess() ÔåÆ functions.php
+  applyPreset() ÔåÆ speed.php
+  calculateDowntimeMinutes() ÔåÆ data.php
+  calculateStopEvents() ÔåÆ data.php
+  createChart() ÔåÆ speed.php
+  deployScheduled() ÔåÆ settings.php
+  escapeHtml() ÔåÆ speed.php
+  filterData() ÔåÆ oee.php
+  getCurrentShiftScope() ÔåÆ functions.php
+  getOEEPercentage() ÔåÆ functions.php
+  getShiftData() ÔåÆ functions.php
+  getShiftID() ÔåÆ functions.php
+  getStopSpeedThreshold() ÔåÆ functions.php
+  getTargetOutput() ÔåÆ functions.php
+  handleBrandText() ÔåÆ header.php
+  init() ÔåÆ tv_dashboard.php
+  isMachineStopped() ÔåÆ functions.php
+  loadOEEData() ÔåÆ oee.php
+  onMachineToggle() ÔåÆ speed.php
+  openEditModal() ÔåÆ oee.php
+  refresh() ÔåÆ tv_dashboard.php
+  renderCards() ÔåÆ oee.php
+  renderPagination() ÔåÆ oee.php
+  resetAnalysis() ÔåÆ speed.php
+  saveVariant() ÔåÆ settings.php
+  showOEE() ÔåÆ output.php
+  showOEEBadge() ÔåÆ tv_dashboard.php
+  startAnalysis() ÔåÆ speed.php
+  sumByGroup() ÔåÆ output.php
+  toggleAllMachines() ÔåÆ speed.php
+  toggleSidebar() ÔåÆ header.php
+  updateClock() ÔåÆ header.php
+  updateDashboard() ÔåÆ index.php
+  updateData() ÔåÆ speed.php
+  updateDowntimePanel() ÔåÆ speed.php
+  updateSchedSkuList() ÔåÆ settings.php
+
+================================================================================
+­ƒÅù´©Å MERMAID DATA FLOW COMPONENTS
+================================================================================
+
+### Backend Components
+  - functions.php: [getTargetOutput, getOEEPercentage, getStopSpeedThreshold, isMachineStopped, getShiftID, getShiftData, getCurrentShiftScope, apiError, apiSuccess]
+  - data.php: [calculateDowntimeMinutes, calculateStopEvents]
+
+### Frontend Components
+  - speed.php: [createChart, escapeHtml, updateDowntimePanel, applyPreset, toggleAllMachines, onMachineToggle, startAnalysis, resetAnalysis, updateData]
+  - oee.php: [loadOEEData, renderCards, filterData, renderPagination, openEditModal]
+  - index.php: [updateDashboard]
+  - output.php: [showOEE, sumByGroup]
+  - tv_dashboard.php: [showOEEBadge, init, refresh]
+  - header.php: [updateClock, handleBrandText, toggleSidebar]
+
+### Utility/Settings Components
+  - settings.php: [saveVariant, updateSchedSkuList, deployScheduled]

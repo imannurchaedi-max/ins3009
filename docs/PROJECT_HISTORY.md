@@ -258,6 +258,23 @@ Setelah scan kartu di gate, UI menampilkan error `safeUpdateRecapAbsen is not de
 - Menambahkan helper recap yang diperlukan langsung ke runtime `MODUL_GATE_PABRIK`.
 - Redeploy modul gate dan sinkronkan kembali `CONFIG_MODUL`.
 
+## FASE 20: Re-Scan Sebelum Konfirmasi Gate
+
+**Tanggal**
+2026-06-05
+
+**Kondisi awal**
+User bisa salah scan kartu, sementara flow gate belum memberi jalur koreksi yang jelas sebelum submit.
+
+**Akar masalah**
+- `MASUK` external melakukan auto-submit setelah scan.
+- `KELUAR` belum punya aksi reset yang eksplisit setelah kartu terbaca.
+
+**Solusi**
+- Menonaktifkan auto-submit setelah scan di `MASUK`.
+- Menambahkan tombol `SCAN ULANG KARTU` untuk `MASUK` dan `KELUAR`.
+- Menjaga state scan tetap bisa dibersihkan tanpa reload halaman.
+
 ## Langkah Lanjutan yang Masih Layak
 
 1. QA manual penuh untuk semua role live.

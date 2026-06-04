@@ -421,15 +421,15 @@ function onSerialScanned(context, serial) {
     const display = document.getElementById('masuk-card-display');
     document.getElementById('masuk-card-num').textContent = serial;
     display.style.display = 'block';
+    setRescanVisibility('masuk', true);
+    showResult('masuk', 'warning', `Kartu <strong>${escHtml(serial)}</strong> sudah terbaca. Periksa dulu, lalu pilih <strong>KONFIRMASI MASUK PABRIK</strong> atau <strong>SCAN ULANG KARTU</strong> jika salah scan.`);
     checkMasukReady();
-    if (STATE.masuk.selectedNIK) {
-      confirmMasuk(); // Auto submit if NIK is already selected
-    }
 
   } else if (context === 'keluar') {
     if (REQUEST_BUSY.keluarScan) return;
     REQUEST_BUSY.keluarScan = true;
     STATE.keluar.scannedSerial = serial;
+    setRescanVisibility('keluar', true);
     showResult('keluar', 'warning', 'Memeriksa kartu...');
     google.script.run
       .withFailureHandler(err => {
@@ -568,6 +568,7 @@ function resetMasuk() {
   if (lokerIn) lokerIn.value = '';
   const confirmBtn = document.getElementById('masuk-confirm');
   if (confirmBtn) confirmBtn.classList.remove('visible');
+  setRescanVisibility('masuk', false);
   updateMasukScannerVisibility();
 }
 
@@ -585,6 +586,7 @@ function resetKeluarUi() {
   
   const lokerIn = document.getElementById('keluar-loker');
   if (lokerIn) lokerIn.value = '';
+  setRescanVisibility('keluar', false);
 }
 
 // ── KELUAR: Handle scan & confirm ──────────────────────────
@@ -614,7 +616,7 @@ function handleKeluarScan(res, serial) {
   showResult('keluar', 'warning',
     `Kartu <strong>${escHtml(serial)}</strong> terikat ke <strong>${escHtml(res.nama)}</strong>.<br>
      <span class="meta">NIK: ${escHtml(res.nik)} - ${escHtml(res.dept)} - Terikat sejak: ${escHtml(res.waktuBind)}</span><br><br>
-     Konfirmasi jika karyawan ini akan pulang.`);
+     Konfirmasi jika karyawan ini akan pulang, atau pilih <strong>SCAN ULANG KARTU</strong> jika salah scan.`);
 
   document.getElementById('keluar-avatar').textContent  = res.nama.charAt(0);
   document.getElementById('keluar-nama').textContent    = res.nama;
@@ -1103,6 +1105,7 @@ function resetSerialInput(context) {
 
   if (context === 'masuk') {
     STATE.masuk.scannedSerial = null;
+    STATE.masuk.completed = false;
     const display = document.getElementById('masuk-card-display');
     const cardNum = document.getElementById('masuk-card-num');
     if (display) display.style.display = 'none';
@@ -1115,6 +1118,8 @@ function resetSerialInput(context) {
   } else if (context === 'security') {
     STATE.security.scannedSerial = null;
   }
+
+  setRescanVisibility(context, false);
 }
 
 function resetAllSerialInputs() {
@@ -1146,6 +1151,12 @@ function setQRDiagnostic(message) {
   if (!diagnostic) return;
   diagnostic.textContent = message || '';
   diagnostic.classList.toggle('visible', Boolean(message));
+}
+
+function setRescanVisibility(context, visible) {
+  const btn = document.getElementById(context + '-rescan-btn');
+  if (!btn) return;
+  btn.style.display = visible ? 'block' : 'none';
 }
 
 function waitForVisibleScanner() {
@@ -1678,6 +1689,7 @@ function bindUiEvents() {
     if (action === 'submit-logout') handleLogout();
     if (action === 'switch-tab') switchTab(control.dataset.tab);
     if (action === 'close-qr') stopQRScanner();
+    if (action === 'reset-serial') resetSerialInput(context);
 
     if (action === 'submit-serial') submitSerial(context);
     if (action === 'confirm-masuk') confirmMasuk();

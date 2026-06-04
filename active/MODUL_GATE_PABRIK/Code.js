@@ -31,6 +31,61 @@ function onOpen() {
 }
 
 // ============================================================
+//  RECAP ABSEN ENGINE (module-local copy to satisfy gate runtime)
+// ============================================================
+function updateRecapAbsen(tanggal, nik, nama, dept, jabatan, jamMasuk, jamKeluar, noKartuMK, noLoker) {
+  const sheet = getSheet(SHEET_RECAP_ABSEN);
+  const lastRow = sheet.getLastRow();
+  const key = makeRecapKey(tanggal, nik);
+  let targetRow = 0;
+  let existingJamMasuk = '';
+  let existingJamKeluar = '';
+
+  if (lastRow > 1) {
+    const data = sheet.getRange(2, 1, lastRow - 1, SHEET_HEADERS[SHEET_RECAP_ABSEN].length).getValues();
+    for (let i = 0; i < data.length; i++) {
+      if (makeRecapKey(data[i][0], data[i][1]) === key) {
+        targetRow = i + 2;
+        existingJamMasuk = asText(data[i][5]);
+        existingJamKeluar = asText(data[i][6]);
+        if (!noKartuMK && data[i][8]) noKartuMK = asText(data[i][8]);
+        if (!noLoker && data[i][9]) noLoker = asText(data[i][9]);
+        break;
+      }
+    }
+  }
+
+  const finalJamMasuk = jamMasuk ? (existingJamMasuk && existingJamMasuk < jamMasuk ? existingJamMasuk : jamMasuk) : existingJamMasuk;
+  const finalJamKeluar = jamKeluar ? (existingJamKeluar && existingJamKeluar > jamKeluar ? existingJamKeluar : jamKeluar) : existingJamKeluar;
+  const row = [
+    asText(tanggal),
+    asText(nik),
+    asText(nama),
+    asText(dept),
+    asText(jabatan),
+    finalJamMasuk,
+    finalJamKeluar,
+    getRecapStatus(finalJamMasuk, finalJamKeluar),
+    asText(noKartuMK || ''),
+    asText(noLoker || '')
+  ];
+
+  if (targetRow) {
+    sheet.getRange(targetRow, 1, 1, row.length).setValues([row]);
+  } else {
+    sheet.appendRow(row);
+  }
+}
+
+function safeUpdateRecapAbsen(tanggal, nik, nama, dept, jabatan, jamMasuk, jamKeluar, noKartuMK, noLoker) {
+  try {
+    updateRecapAbsen(tanggal, nik, nama, dept, jabatan, jamMasuk, jamKeluar, noKartuMK, noLoker);
+  } catch(e) {
+    Logger.log('Gagal update recap ABSEN IN OUT MK: ' + e.message);
+  }
+}
+
+// ============================================================
 //  BINDING KARTU MK (Gate-specific business logic)
 // ============================================================
 function getBindingStatus(noKartuMK) {

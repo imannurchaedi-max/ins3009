@@ -242,6 +242,22 @@ Walau jalur scanner sudah dihardening, web app GAS di Chrome mobile tetap bisa g
 - Mengalihkan tombol scan ke `capture="environment"` secara satu tap pada browser yang memang tidak bisa live scan.
 - Tetap mempertahankan jalur native live scan untuk browser yang mendukungnya.
 
+## FASE 19: Hotfix Helper Recap di Modul Gate
+
+**Tanggal**
+2026-06-05
+
+**Kondisi awal**
+Setelah scan kartu di gate, UI menampilkan error `safeUpdateRecapAbsen is not defined`.
+
+**Akar masalah**
+- `MODUL_GATE_PABRIK` memanggil helper recap yang hanya tersedia di runtime root lama.
+- Saat project dipecah per modul, helper itu tidak ikut termuat di project gate.
+
+**Solusi**
+- Menambahkan helper recap yang diperlukan langsung ke runtime `MODUL_GATE_PABRIK`.
+- Redeploy modul gate dan sinkronkan kembali `CONFIG_MODUL`.
+
 ## Langkah Lanjutan yang Masih Layak
 
 1. QA manual penuh untuk semua role live.

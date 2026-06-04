@@ -1,61 +1,81 @@
 # Deployment Guide
 
-## Scope
+Panduan ini mengikuti struktur repo aktif saat ini, yaitu semua source runtime berada di folder `active/`.
 
-Project ini sekarang memakai file runtime:
+## Prasyarat
 
-- `Code.js` untuk backend Google Apps Script
-- `Index.html` untuk shell UI
-- `app.html` untuk logic frontend
-- `style.html` untuk styling
+- `clasp` sudah terpasang dan login.
+- File `.clasp.json` per modul di `active/*/.clasp.json` sudah benar.
+- Akses ke spreadsheet master dan sheet `CONFIG_MODUL` tersedia.
 
-## Struktur Deploy
+## Lokasi Deploy
 
-- Root project
-  Source master lokal untuk runtime utama dan basis sinkronisasi module.
-- `HOME_PORTAL`
-  Portal utama yang mengarahkan user ke module lain.
-- `MODUL_GATE_PABRIK`
-  Module masuk dan keluar pabrik.
-- `MODUL_AREA_KERJA`
-  Module scan area kerja.
-- `MODUL_REPORT`
-  Module laporan dan review data.
+- `active/HOME_PORTAL`
+- `active/MODUL_GATE_PABRIK`
+- `active/MODUL_AREA_KERJA`
+- `active/MODUL_REPORT`
 
-## Deployment Lokal
+## Workflow Aman
 
-1. Pastikan `clasp` sudah login.
-2. Pastikan `.clasp.json` pada folder target menunjuk ke Apps Script project yang benar.
-3. Push source dengan `clasp push`.
-4. Deploy web app dengan `clasp deploy`.
-5. Untuk arsitektur modular, update URL module ke sheet `CONFIG_MODUL`.
+1. Edit source hanya di `active/`.
+2. Jalankan audit:
+   - `python scripts/audit_project.py`
+   - `python scripts/extract_functions.py`
+   - `python scripts/compare_gas_runtime.py`
+3. Deploy modul.
+4. Update `CONFIG_MODUL`.
+5. Smoke test URL hasil deploy.
 
-## Script Bantu
+## Deploy Semua Modul
 
-- `python scripts/build_microservices.py`
-  Menyalin source root ke module dan menjaga spesialisasi module tetap ada.
-- `python scripts/deploy_all.py`
-  Deploy semua module dan mengisi `CONFIG_MODUL` lewat Google Sheets API lokal.
-- `python scripts/deploy_all_isolated.py`
-  Alternatif deploy per module.
-- `python scripts/update_config_sheet.py`
-  Update konfigurasi URL module pada sheet jika diperlukan.
-  Contoh:
-  `python scripts/update_config_sheet.py --gate-url <url> --area-url <url> --report-url <url>`
-  Helper ini akan mencoba Google Sheets API dulu, lalu fallback ke injector Apps Script sementara jika API belum aktif.
+Perintah paling aman saat ini:
 
-## Validasi Setelah Deploy
+```powershell
+python scripts/deploy_all.py --include-home
+```
 
-- Buka `HOME_PORTAL` dan login normal.
-- Pastikan tab module membuka URL yang benar.
-- Uji flow `MASUK` internal.
-- Uji flow `MASUK` external dengan kartu MK.
-- Uji flow `KELUAR`.
-- Uji `SCAN AREA`.
-- Uji `CEK ABSEN` dan `CEK AREA`.
+Script ini akan:
+- menjalankan `clasp push --force` per modul
+- menjalankan `clasp deploy`
+- mengambil URL `/exec`
+- memanggil `scripts/update_config_sheet.py`
 
-## Catatan
+## Update CONFIG_MODUL
 
-- `CONFIG_MODUL` tidak otomatis ter-update hanya karena source lokal berubah, jadi jalankan helper update setelah deploy.
-- Perubahan lokal baru aktif di web app setelah `clasp push` dan deploy ulang.
-- Runtime aktif project ini memakai `Code.js`, bukan `Code.gs`.
+Updater utama:
+
+```powershell
+python scripts/update_config_sheet.py ^
+  --gate-url "<url gate>" ^
+  --area-url "<url area>" ^
+  --report-url "<url report>" ^
+  --home-url "<url home>"
+```
+
+Catatan:
+- Jika Sheets API pada project OAuth `clasp` masih disabled, script ini punya fallback temporary injector melalui GAS.
+- Fallback akan menulis `CONFIG_MODUL`, lalu merestore source `HOME_PORTAL`.
+
+## Verifikasi Setelah Deploy
+
+Pastikan:
+
+1. `deployment_urls.json` berisi URL terbaru jika dipakai oleh tooling lokal.
+2. `CONFIG_MODUL` di spreadsheet memuat:
+   - `GATE_PABRIK`
+   - `AREA_KERJA`
+   - `REPORT`
+   - `HOME_PORTAL`
+3. URL `/exec` masing-masing bisa dibuka.
+4. Smoke test minimum:
+   - login dari `HOME_PORTAL`
+   - buka `GATE_PABRIK`
+   - cek flow `MASUK`
+   - cek flow `KELUAR`
+   - buka `REPORT`
+
+## Aturan Operasional
+
+- Jangan deploy dari file root lama jika ada duplikasi dengan `active/`.
+- Setelah perubahan code runtime, audit dan deploy harus berjalan berurutan.
+- Jika ada perubahan struktur sheet, perbarui dokumentasi dan validasi header runtime sebelum release.

@@ -1,34 +1,75 @@
-# Runtime Hardening 2026-06-02
+# Runtime Hardening Notes
 
-## Summary
+Dokumen ini merangkum keputusan hardening runtime yang menjaga aplikasi tetap stabil selama migrasi multi-modul dan sinkronisasi auth.
 
-Perbaikan ini menutup bug scanner external, celah bypass masuk internal, duplikasi masuk/keluar, dan hasil audit runtime yang sebelumnya salah membaca backend `.js`.
+## Ruang Lingkup
 
-## Critical Issues Fixed
+- stabilitas auth lintas modul
+- klasifikasi internal vs external
+- konsistensi recap dan header sheet
+- disiplin source of truth runtime
 
-- Frontend dan backend sekarang memakai `TYPE KAYARAWAN` sebagai bagian dari source of truth `internal/external`.
-- `verifyLogin()` dan `verifySession()` mengirim `type` dan `isExternal` ke frontend.
-- External wajib scan kartu MK saat masuk dan tidak bisa masuk dengan NIK sebagai kartu.
-- Internal hanya bisa masuk dengan NIK / ID internal sendiri.
-- Internal tidak bisa keluar jika belum berstatus `DI DALAM`.
-- Masuk ulang di hari yang sama ditolak jika masih `DI DALAM` atau sudah `SELESAI`.
-- Input opsional cari NIK pada halaman masuk sekarang tersambung ke autocomplete list.
+## 1. Auth Bootstrap Antar Modul
 
-## Runtime Mapping
+Masalah yang muncul:
+- user bisa login di `HOME_PORTAL`, lalu mental kembali ke login saat pindah modul
+- flow mitra terasa berulang karena modul tujuan tidak membaca bootstrap session dengan konsisten
 
-| GAS Function | Frontend Caller | Sheet Dependency | Missing / Crash Risk |
-| --- | --- | --- | --- |
-| `verifyLogin` | `handleLoginSubmit` | `KARYAWAN` | Covered |
-| `verifySession` | Module auto-login | `KARYAWAN` | Covered |
-| `searchKaryawan` | autocomplete search | `KARYAWAN` | Covered |
-| `bindKartu` | `confirmMasuk` | `KARYAWAN`, `BINDING_KARTU_MK`, `REGISTRASI SAAT MASUK PABRIK`, `ABSEN IN OUT MK` | Covered |
-| `getBindingStatus` | `handleKeluarScan` | `BINDING_KARTU_MK`, `KARYAWAN`, `ABSEN IN OUT MK` | Covered |
-| `releaseKartu` | `confirmKeluar` | `KARYAWAN`, `BINDING_KARTU_MK`, `REGISTRASI SAAT KELUAR PABRIK`, `ABSEN IN OUT MK` | Covered |
-| `scanAreaKerja` | security scan | `KARYAWAN`, `BINDING_KARTU_MK`, `REGISTRASI MASUK KELUAR AREA KERJA`, `ABSEN IN OUT MK` | Covered |
+Keputusan hardening:
+- `HOME_PORTAL` menjadi titik masuk utama
+- modul turunan membaca session bootstrap yang konsisten
+- perpindahan modul tidak mengandalkan flow login ganda
 
-## Validation
+## 2. Internal vs External
 
-- `node --check` passed for root and module `Code.js` files.
-- `python scripts/audit_project.py` passed with no missing runtime dependencies.
-- `python scripts/extract_functions.py` now extracts GAS functions from `.js`.
-- `python scripts/compare_gas_runtime.py` reports `runtime_status: ok`.
+Masalah yang muncul:
+- scanner untuk user external bisa hilang jika klasifikasi hanya mengandalkan `dept/jabatan`
+
+Keputusan hardening:
+- tipe karyawan dari master data dijadikan sinyal utama
+- fallback berbasis `dept/jabatan` hanya dipakai jika tipe tidak tersedia
+- backend tetap harus memverifikasi jalur masuk agar external tidak bisa menyamar sebagai internal
+
+## 3. Header Sheet dan Backward Compatibility
+
+Masalah yang muncul:
+- sheet `ABSEN IN OUT MK` lama bisa gagal diproses jika kolom baru masih kosong
+
+Keputusan hardening:
+- validasi header tetap dipertahankan
+- untuk header recap yang kosong namun memang wajib, runtime melakukan auto-heal row 1 sebelum gagal
+
+Ini menjaga:
+- sheet lama tetap bisa dibaca
+- migrasi header tidak perlu selalu dilakukan manual
+
+## 4. Locking dan Konsistensi Tulis
+
+Keputusan hardening:
+- operasi write utama tetap dibungkus `withDocumentLock()`
+- recap diperlakukan sebagai data turunan, bukan sumber primer
+- integritas `BINDING_KARTU_MK` harus tetap menjadi dasar status kartu aktif
+
+## 5. Multi-Modul dan Registry URL
+
+Keputusan hardening:
+- URL aktif modul disimpan di `CONFIG_MODUL`
+- deploy script wajib meng-update registry itu setelah deploy
+- `HOME_PORTAL` tidak boleh mengandalkan URL hardcoded jika registry tersedia
+
+## 6. Canonical Source Repo
+
+Kondisi terbaru:
+- source aktif berada di `active/`
+
+Keputusan hardening:
+- audit, edit, deploy, dan dokumentasi harus mengacu ke `active/`
+- file root lama diperlakukan sebagai legacy atau transisi sampai benar-benar dipensiunkan
+
+## Checklist Pasca Perubahan Runtime
+
+1. Audit caller, function, dan dependensi sheet.
+2. Pastikan auth lintas modul tetap mulus.
+3. Pastikan flow external masih menampilkan scanner.
+4. Pastikan `CONFIG_MODUL` ter-update setelah deploy.
+5. Pastikan tidak ada mismatch header pada sheet recap utama.

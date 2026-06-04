@@ -9,7 +9,7 @@ Source runtime yang aktif saat ini berada di folder [`active/`](./active).
 - `active/Code.js`, `active/Index.html`, `active/app.html`, `active/style.html`
   Runtime utama untuk aplikasi induk.
 - `active/HOME_PORTAL`
-  Portal masuk dan router antar modul.
+  Portal masuk dan router antar modul. URL-nya diperlakukan tetap.
 - `active/MODUL_GATE_PABRIK`
   Modul masuk, keluar, dan cek absen pabrik.
 - `active/MODUL_AREA_KERJA`
@@ -46,8 +46,9 @@ Folder root masih dapat berisi artefak transisi, tooling, atau file lama. Untuk 
    - `python scripts/extract_functions.py`
    - `python scripts/compare_gas_runtime.py`
 3. Deploy modul lewat `scripts/deploy_all.py`.
-4. Pastikan `CONFIG_MODUL` ikut diperbarui oleh `scripts/update_config_sheet.py`.
-5. Verifikasi URL deploy aktif dan smoke test role utama.
+4. `HOME_PORTAL` tidak ikut auto-deploy biasa. Jika perlu update, gunakan `scripts/deploy_home_fixed.py` agar URL tetap.
+5. Pastikan `CONFIG_MODUL` ikut diperbarui oleh `scripts/update_config_sheet.py` tanpa menimpa baris `HOME_PORTAL`.
+6. Verifikasi URL deploy aktif dan smoke test role utama.
 
 ## Catatan Lokal
 

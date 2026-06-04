@@ -11,6 +11,8 @@ import urllib.request
 
 SPREADSHEET_ID = "1jTsZixaANJd8Ijs3f66LwbXSBC9UcRoALLolEvxiz40"
 RANGE_NAME = "CONFIG_MODUL!A1:B5"
+DEPLOYMENT_LIMIT = 20
+KEEP_RECENT_DEPLOYMENTS = 12
 
 
 def load_access_token():
@@ -33,7 +35,58 @@ def request_json(method, url, token, payload=None):
         return json.loads(response.read().decode("utf-8"))
 
 
-def build_payload(gate_url, area_url, report_url, home_url):
+def list_versioned_deployments(path):
+    result = subprocess.run(
+        ["clasp", "deployments"],
+        cwd=path,
+        capture_output=True,
+        text=True,
+        shell=True,
+        check=True,
+    )
+    deployments = []
+    pattern = re.compile(r"^- ([A-Za-z0-9_-]+) @(\d+)(?: - (.*))?$")
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        match = pattern.match(line)
+        if not match:
+            continue
+        deployments.append(
+            {
+                "id": match.group(1),
+                "version": int(match.group(2)),
+                "description": match.group(3) or "",
+            }
+        )
+    return deployments
+
+
+def ensure_deploy_capacity(path, keep_recent=KEEP_RECENT_DEPLOYMENTS):
+    deployments = list_versioned_deployments(path)
+    if len(deployments) < DEPLOYMENT_LIMIT:
+        return
+
+    deployments.sort(key=lambda item: item["version"])
+    removable = deployments[: max(0, len(deployments) - keep_recent + 1)]
+    for item in removable:
+        subprocess.run(
+            ["clasp", "undeploy", item["id"]],
+            cwd=path,
+            capture_output=True,
+            text=True,
+            shell=True,
+            check=True,
+        )
+
+
+def extract_preserved_home_url(sheet_values):
+    for row in sheet_values:
+        if len(row) >= 2 and str(row[0]).strip().upper() == "HOME_PORTAL":
+            return str(row[1]).strip()
+    return ""
+
+
+def build_payload(gate_url, area_url, report_url, preserved_home_url):
     return {
         "range": RANGE_NAME,
         "majorDimension": "ROWS",
@@ -42,7 +95,7 @@ def build_payload(gate_url, area_url, report_url, home_url):
             ["GATE_PABRIK", gate_url],
             ["AREA_KERJA", area_url],
             ["REPORT", report_url],
-            ["HOME_PORTAL", home_url],
+            ["HOME_PORTAL", preserved_home_url],
         ],
     }
 
@@ -55,32 +108,58 @@ def verify_sheet(token):
     return request_json("GET", verify_url, token)
 
 
-def update_sheet(gate_url, area_url, report_url, home_url):
+def update_sheet(gate_url, area_url, report_url):
     token = load_access_token()
+    existing = verify_sheet(token)
+    preserved_home_url = extract_preserved_home_url(existing.get("values", []))
     update_url = (
         f"https://sheets.googleapis.com/v4/spreadsheets/"
         f"{SPREADSHEET_ID}/values/{RANGE_NAME}?valueInputOption=USER_ENTERED"
     )
-    payload = build_payload(gate_url, area_url, report_url, home_url)
+    payload = build_payload(gate_url, area_url, report_url, preserved_home_url)
     update_result = request_json("PUT", update_url, token, payload)
     verify_result = verify_sheet(token)
     return update_result, verify_result
 
 
-def build_temp_injector_code(gate_url, area_url, report_url, home_url):
+def build_temp_injector_code(gate_url, area_url, report_url):
     return f"""function doGet() {{
   try {{
     const ss = SpreadsheetApp.openById('{SPREADSHEET_ID}');
     let sheet = ss.getSheetByName('CONFIG_MODUL');
-    if (!sheet) sheet = ss.insertSheet('CONFIG_MODUL');
-    sheet.clearContents();
-    sheet.getRange(1, 1, 5, 2).setValues([
-      ['NAMA_MODUL', 'LINK_MODUL'],
-      ['GATE_PABRIK', {json.dumps(gate_url)}],
-      ['AREA_KERJA', {json.dumps(area_url)}],
-      ['REPORT', {json.dumps(report_url)}],
-      ['HOME_PORTAL', {json.dumps(home_url)}]
-    ]);
+    if (!sheet) {{
+      sheet = ss.insertSheet('CONFIG_MODUL');
+      sheet.appendRow(['NAMA_MODUL', 'LINK_MODUL']);
+      sheet.getRange('A1:B1').setFontWeight('bold');
+    }}
+
+    const target = {{
+      GATE_PABRIK: {json.dumps(gate_url)},
+      AREA_KERJA: {json.dumps(area_url)},
+      REPORT: {json.dumps(report_url)}
+    }};
+
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {{
+      const name = String(data[i][0] || '').trim().toUpperCase();
+      if (target[name]) {{
+        sheet.getRange(i + 1, 2).setValue(target[name]);
+      }}
+    }}
+
+    for (const [name, url] of Object.entries(target)) {{
+      let found = false;
+      for (let i = 1; i < data.length; i++) {{
+        if (String(data[i][0] || '').trim().toUpperCase() === name) {{
+          found = true;
+          break;
+        }}
+      }}
+      if (!found) {{
+        sheet.appendRow([name, url]);
+      }}
+    }}
+
     return ContentService.createTextOutput('OK_CONFIG_MODUL_UPDATED');
   }} catch (err) {{
     return ContentService.createTextOutput('ERROR: ' + err.message);
@@ -89,15 +168,15 @@ def build_temp_injector_code(gate_url, area_url, report_url, home_url):
 """
 
 
-def fallback_update_via_temp_deploy(gate_url, area_url, report_url, home_url):
+def fallback_update_via_temp_deploy(gate_url, area_url, report_url):
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    home_dir = os.path.join(project_root, "active", "HOME_PORTAL")
-    code_path = os.path.join(home_dir, "Code.js")
+    injector_dir = os.path.join(project_root, "active", "MODUL_GATE_PABRIK")
+    code_path = os.path.join(injector_dir, "Code.js")
 
     with open(code_path, "r", encoding="utf-8") as handle:
         original_code = handle.read()
 
-    temp_code = build_temp_injector_code(gate_url, area_url, report_url, home_url)
+    temp_code = build_temp_injector_code(gate_url, area_url, report_url)
 
     try:
         with open(code_path, "w", encoding="utf-8") as handle:
@@ -105,7 +184,7 @@ def fallback_update_via_temp_deploy(gate_url, area_url, report_url, home_url):
 
         push_result = subprocess.run(
             ["clasp", "push", "--force"],
-            cwd=home_dir,
+            cwd=injector_dir,
             capture_output=True,
             text=True,
             shell=True,
@@ -113,9 +192,11 @@ def fallback_update_via_temp_deploy(gate_url, area_url, report_url, home_url):
         if push_result.returncode != 0:
             raise RuntimeError(push_result.stdout + push_result.stderr)
 
+        ensure_deploy_capacity(injector_dir)
+
         deploy_result = subprocess.run(
             ["clasp", "deploy", "--description", "Temp CONFIG_MODUL Injection"],
-            cwd=home_dir,
+            cwd=injector_dir,
             capture_output=True,
             text=True,
             shell=True,
@@ -144,7 +225,7 @@ def fallback_update_via_temp_deploy(gate_url, area_url, report_url, home_url):
             handle.write(original_code)
         subprocess.run(
             ["clasp", "push", "--force"],
-            cwd=home_dir,
+            cwd=injector_dir,
             capture_output=True,
             text=True,
             shell=True,
@@ -156,7 +237,6 @@ def main():
     parser.add_argument("--gate-url", required=True, help="Exec URL for GATE_PABRIK module")
     parser.add_argument("--area-url", required=True, help="Exec URL for AREA_KERJA module")
     parser.add_argument("--report-url", required=True, help="Exec URL for REPORT module")
-    parser.add_argument("--home-url", required=True, help="Exec URL for HOME_PORTAL module")
     args = parser.parse_args()
 
     try:
@@ -164,7 +244,6 @@ def main():
             args.gate_url,
             args.area_url,
             args.report_url,
-            args.home_url,
         )
     except urllib.error.HTTPError as err:
         error_body = err.read().decode("utf-8")
@@ -175,7 +254,6 @@ def main():
                     args.gate_url,
                     args.area_url,
                     args.report_url,
-                    args.home_url,
                 )
             except Exception as fallback_err:
                 print(f"Fallback failed: {fallback_err}")

@@ -30,7 +30,7 @@ Project ini adalah web app Google Apps Script untuk access control, absensi, dan
 ## Modul Micro-Frontend
 
 - `active/HOME_PORTAL/*`
-  Portal utama, auth bootstrap, dan router ke modul lain melalui `CONFIG_MODUL`.
+  Portal utama, auth bootstrap, dan router ke modul lain melalui `CONFIG_MODUL`. URL publiknya diperlakukan tetap.
 - `active/MODUL_GATE_PABRIK/*`
   Flow `MASUK`, `KELUAR`, dan `CEK ABSEN`.
 - `active/MODUL_AREA_KERJA/*`
@@ -65,7 +65,7 @@ Project ini adalah web app Google Apps Script untuk access control, absensi, dan
 - `ABSEN IN OUT MK`
   Recap harian hasil turunan dari log masuk/keluar.
 - `CONFIG_MODUL`
-  Mapping nama modul ke URL deploy aktif.
+  Mapping nama modul ke URL deploy aktif. Baris `HOME_PORTAL` dipertahankan sebagai URL container permanen.
 
 ## Dependensi Operasional
 

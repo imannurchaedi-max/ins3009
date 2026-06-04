@@ -56,6 +56,8 @@ Keputusan hardening:
 - URL aktif modul disimpan di `CONFIG_MODUL`
 - deploy script wajib meng-update registry itu setelah deploy
 - `HOME_PORTAL` tidak boleh mengandalkan URL hardcoded jika registry tersedia
+- baris `HOME_PORTAL` di `CONFIG_MODUL` diperlakukan tetap dan tidak boleh ditimpa oleh flow auto-deploy modul
+- `HOME_PORTAL` tidak boleh ikut auto-deploy biasa; jika perlu update, deployment harus di-update in place
 
 ## 6. Canonical Source Repo
 

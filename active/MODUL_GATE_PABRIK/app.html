@@ -1307,17 +1307,64 @@ async function startNativeCameraScanner(stream) {
   }
 
   const reader = document.getElementById('qr-reader');
-
-  // Native live scanner belum dipakai pada flow aktif.
-  // Jika fungsi ini terpanggil, hentikan stream agar kamera tidak menggantung.
-  if (!reader && stream && stream.getTracks) {
-    stream.getTracks().forEach(track => track.stop());
-    return;
+  if (!reader) {
+    if (stream && stream.getTracks) {
+      stream.getTracks().forEach(track => track.stop());
+    }
+    throw new Error('Elemen scanner tidak ditemukan.');
   }
 
-  if (stream && stream.getTracks) {
-    stream.getTracks().forEach(track => track.stop());
-  }
+  reader.innerHTML = '';
+
+  const video = document.createElement('video');
+  video.className = 'qr-video';
+  video.setAttribute('playsinline', 'true');
+  video.setAttribute('muted', 'true');
+  video.setAttribute('autoplay', 'true');
+  video.srcObject = stream;
+  reader.appendChild(video);
+
+  QR.stream = stream;
+  QR.video = video;
+  QR.detector = new BarcodeDetector({ formats: getNativeBarcodeFormats() });
+  QR.usingNative = true;
+  QR.successHandled = false;
+
+  await video.play();
+  document.getElementById('qr-result-text').textContent = 'Kamera aktif. Arahkan ke barcode/QR.';
+
+  const tick = async () => {
+    if (!QR.isScanning || QR.successHandled || !QR.video) return;
+
+    try {
+      if (QR.video.readyState >= 2) {
+        const barcodes = await QR.detector.detect(QR.video);
+        if (barcodes && barcodes.length > 0) {
+          const rawValue = (barcodes.find(item => item && item.rawValue) || barcodes[0]).rawValue || '';
+          const serial = normalizeSerial(rawValue);
+          if (serial && isValidSerial(serial)) {
+            QR.successHandled = true;
+            indicateScanSuccess();
+            document.getElementById('qr-result-text').textContent = 'Ditemukan: ' + serial;
+            await stopQRScanner();
+            onSerialScanned(QR.context, serial);
+            return;
+          }
+        }
+      }
+    } catch (err) {
+      const message = String(err && (err.name || err.message || err));
+      if (!/notfounderror|invalidstateerror|operationerror/i.test(message)) {
+        setQRDiagnostic('Scanner native aktif, tapi barcode belum terbaca stabil. Coba dekatkan kartu dan kurangi silau.');
+      }
+    }
+
+    if (QR.isScanning && !QR.successHandled) {
+      QR.scanFrame = window.requestAnimationFrame(tick);
+    }
+  };
+
+  QR.scanFrame = window.requestAnimationFrame(tick);
 }
 
 function showScanToast(message) {
@@ -1337,81 +1384,214 @@ function indicateScanSuccess() {
 
 // ── LIVE QR SCANNER (WebRTC) ───────────────────────────────
 
-window.openLiveScanner = function(context) {
+async function startHtml5CameraScanner() {
   if (typeof Html5Qrcode === 'undefined') {
-    showResult(context, 'error', 'Library Html5Qrcode belum termuat.');
-    return;
+    throw new Error('Library Html5Qrcode belum termuat.');
   }
-  
-  const overlay = document.getElementById('qr-overlay');
-  const fbBtn = document.getElementById('qr-fallback-btn');
-  if (fbBtn) fbBtn.style.display = 'none';
+
   const reader = document.getElementById('qr-reader');
-  if (!overlay || !reader) return;
-  
-  // Set current context
-  QR.context = context;
-  
-  // Reset overlay
-  document.getElementById('qr-result-text').textContent = 'Mencari barcode/QR...';
-  setQRDiagnostic('');
-  
-  overlay.classList.add('active');
-  
+  if (!reader) throw new Error('Elemen scanner tidak ditemukan.');
+
+  reader.innerHTML = '';
+
   const formats = getScannerFormats();
   if (!QR.html5QrCode) {
     QR.html5QrCode = new Html5Qrcode('qr-reader', formats ? { formatsToSupport: formats } : undefined);
   }
-  
-  QR.isScanning = true;
-  
+
+  QR.usingNative = false;
+  QR.successHandled = false;
+  document.getElementById('qr-result-text').textContent = 'Mencari barcode/QR...';
+
   const config = {
     fps: 10,
     qrbox: { width: 250, height: 150 },
     aspectRatio: 1.0,
     disableFlip: false
   };
-  
-  QR.html5QrCode.start(
-    { facingMode: "environment" }, 
+
+  await QR.html5QrCode.start(
+    { facingMode: 'environment' },
     config,
-    (decodedText, decodedResult) => {
-      // onSuccess
+    async decodedText => {
       const serial = normalizeSerial(decodedText);
-      if (serial && isValidSerial(serial)) {
-        indicateScanSuccess();
-        document.getElementById('qr-result-text').textContent = 'Ditemukan: ' + serial;
-        stopQRScanner().then(() => {
-          onSerialScanned(QR.context, serial);
-        });
-      }
+      if (!serial || !isValidSerial(serial) || QR.successHandled) return;
+      QR.successHandled = true;
+      indicateScanSuccess();
+      document.getElementById('qr-result-text').textContent = 'Ditemukan: ' + serial;
+      await stopQRScanner();
+      onSerialScanned(QR.context, serial);
     },
-    (errorMessage) => {
-      // onProgress (ignore mostly)
-    }
-  ).catch(err => {
-    let msg = typeof err === 'string' ? err : (err.message || 'Izin ditolak atau tidak didukung');
-    setQRDiagnostic('Kamera gagal: ' + msg);
-    const fbBtn = document.getElementById('qr-fallback-btn');
-    if (fbBtn) fbBtn.style.display = 'block';
-    QR.isScanning = false;
+    () => {}
+  );
+}
+
+function cleanupNativeScanner() {
+  if (QR.scanFrame) {
+    window.cancelAnimationFrame(QR.scanFrame);
+    QR.scanFrame = null;
+  }
+  if (QR.video) {
+    try { QR.video.pause(); } catch (err) {}
+    try { QR.video.srcObject = null; } catch (err) {}
+    if (QR.video.parentNode) QR.video.parentNode.removeChild(QR.video);
+    QR.video = null;
+  }
+  if (QR.stream && QR.stream.getTracks) {
+    QR.stream.getTracks().forEach(track => track.stop());
+  }
+  QR.stream = null;
+  QR.detector = null;
+  QR.usingNative = false;
+}
+
+function prefersDirectCaptureFallback() {
+  const ua = (navigator.userAgent || '').toLowerCase();
+  const isMobile = /android|iphone|ipad|ipod/.test(ua);
+  return isMobile && getCameraPolicyState() === 'blocked';
+}
+
+function openDirectCaptureFallback(context) {
+  const input = document.getElementById('qr-fallback-input');
+  if (!input) return false;
+  QR.context = context;
+  showResult(context, 'warning', 'Live camera dibatasi oleh web app Apps Script di browser ini. Kamera foto perangkat dibuka sebagai mode scan yang lebih stabil.');
+  input.click();
+  return true;
+}
+
+function syncScanButtonMode() {
+  const useCaptureFallback = prefersDirectCaptureFallback();
+  document.querySelectorAll('.btn-scan-qr span').forEach(span => {
+    span.textContent = useCaptureFallback ? 'BUKA KAMERA FOTO' : 'BUKA KAMERA (SCAN)';
   });
+}
+
+async function ensureFileScanner() {
+  if (typeof Html5Qrcode === 'undefined') {
+    throw new Error('Library Html5Qrcode belum termuat.');
+  }
+  if (QR.html5QrCode) return QR.html5QrCode;
+
+  let dummyReader = document.getElementById('dummy-qr-reader');
+  if (!dummyReader) {
+    dummyReader = document.createElement('div');
+    dummyReader.id = 'dummy-qr-reader';
+    dummyReader.style.display = 'none';
+    document.body.appendChild(dummyReader);
+  }
+
+  const formats = getScannerFormats();
+  QR.html5QrCode = new Html5Qrcode('dummy-qr-reader', formats ? { formatsToSupport: formats } : undefined);
+  return QR.html5QrCode;
+}
+
+function showScannerFailure(context, err, mode) {
+  const info = normalizeCameraError(err);
+  const permissionStatePromise = getCameraPermissionState().catch(() => 'unknown');
+  Promise.resolve(permissionStatePromise).then(permissionState => {
+    const policyState = getCameraPolicyState();
+    setQRDiagnostic(info.msg + '\n\n' + buildCameraDiagnostic(permissionState, policyState, mode));
+  });
+  document.getElementById('qr-result-text').textContent = info.title;
+  showResult(context, 'error', info.msg);
+}
+
+window.openLiveScanner = async function(context) {
+  const overlay = document.getElementById('qr-overlay');
+  const fbBtn = document.getElementById('qr-fallback-btn');
+  if (fbBtn) fbBtn.style.display = 'none';
+  const reader = document.getElementById('qr-reader');
+  if (!overlay || !reader) return;
+
+  if (QR.isStarting || QR.isScanning) return;
+
+  if (prefersDirectCaptureFallback()) {
+    openDirectCaptureFallback(context);
+    return;
+  }
+
+  // Set current context
+  QR.context = context;
+  QR.successHandled = false;
+
+  // Reset overlay
+  document.getElementById('qr-result-text').textContent = 'Mencari barcode/QR...';
+  setQRDiagnostic('');
+  document.body.classList.add('scanner-open');
+  overlay.classList.add('active');
+
+  QR.isStarting = true;
+  QR.isScanning = true;
+
+  try {
+    await waitForVisibleScanner();
+
+    const preferredMode = typeof BarcodeDetector !== 'undefined' ? 'native' : 'html5-qrcode';
+    const permissionState = await getCameraPermissionState();
+    const policyState = getCameraPolicyState();
+    setQRDiagnostic(buildCameraDiagnostic(permissionState, policyState, preferredMode));
+
+    if (policyState === 'blocked') {
+      const err = new Error('Akses kamera diblokir oleh permission policy host.');
+      err.code = 'CAMERA_POLICY_BLOCKED';
+      throw err;
+    }
+
+    if (permissionState === 'denied') {
+      const err = new Error('Izin kamera sudah ditolak browser.');
+      err.code = 'CAMERA_PERMISSION_DENIED_STICKY';
+      throw err;
+    }
+
+    if (typeof BarcodeDetector !== 'undefined') {
+      try {
+        const stream = await requestNativeCameraStream();
+        await startNativeCameraScanner(stream);
+        return;
+      } catch (nativeErr) {
+        cleanupNativeScanner();
+        const message = String(nativeErr && (nativeErr.code || nativeErr.name || nativeErr.message || nativeErr));
+        if (/CAMERA_POLICY_BLOCKED|CAMERA_PERMISSION_DENIED_STICKY|INSECURE_CONTEXT|NotAllowedError|NotFoundError|NotReadableError/i.test(message)) {
+          throw nativeErr;
+        }
+      }
+    }
+
+    await startHtml5CameraScanner();
+  } catch (err) {
+    const fbButton = document.getElementById('qr-fallback-btn');
+    if (fbButton) fbButton.style.display = 'block';
+    showScannerFailure(context, err, typeof BarcodeDetector !== 'undefined' ? 'native/html5-qrcode' : 'html5-qrcode');
+    QR.isScanning = false;
+    cleanupNativeScanner();
+  } finally {
+    QR.isStarting = false;
+  }
 };
 
 window.stopQRScanner = async function() {
-  if (QR.html5QrCode && QR.isScanning) {
+  if (QR.isStopping) return;
+  QR.isStopping = true;
+
+  if (QR.html5QrCode && QR.isScanning && !QR.usingNative) {
     try {
       await QR.html5QrCode.stop();
-      // QR.html5QrCode.clear();
     } catch (e) {
-      console.warn("Failed to stop QR scanner", e);
+      console.warn('Failed to stop QR scanner', e);
     }
   }
+
+  cleanupNativeScanner();
   QR.isScanning = false;
+  QR.isStarting = false;
+  QR.isStopping = false;
+  QR.successHandled = false;
   const overlay = document.getElementById('qr-overlay');
   const fbBtn = document.getElementById('qr-fallback-btn');
   if (fbBtn) fbBtn.style.display = 'none';
   if (overlay) overlay.classList.remove('active');
+  document.body.classList.remove('scanner-open');
 };
 
 
@@ -1421,7 +1601,33 @@ window.handleFallbackImage = async function(e) {
   document.getElementById('qr-result-text').textContent = 'Memproses gambar...';
   setQRDiagnostic('');
   try {
-    const decodedText = await QR.html5QrCode.scanFile(file, true);
+    let decodedText = null;
+
+    if (typeof BarcodeDetector !== 'undefined') {
+      try {
+        const detector = new BarcodeDetector({ formats: getNativeBarcodeFormats() });
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = url;
+        });
+        const barcodes = await detector.detect(img);
+        URL.revokeObjectURL(url);
+        if (barcodes && barcodes.length > 0) {
+          decodedText = (barcodes.find(item => item && item.rawValue) || barcodes[0]).rawValue || '';
+        }
+      } catch (err) {
+        console.warn('Native fallback scan failed', err);
+      }
+    }
+
+    if (!decodedText) {
+      const scanner = await ensureFileScanner();
+      decodedText = await scanner.scanFile(file, true);
+    }
+
     const serial = normalizeSerial(decodedText);
     if (serial && isValidSerial(serial)) {
       indicateScanSuccess();
@@ -1471,6 +1677,7 @@ function bindUiEvents() {
     if (action === 'submit-login') handleLoginSubmit();
     if (action === 'submit-logout') handleLogout();
     if (action === 'switch-tab') switchTab(control.dataset.tab);
+    if (action === 'close-qr') stopQRScanner();
 
     if (action === 'submit-serial') submitSerial(context);
     if (action === 'confirm-masuk') confirmMasuk();
@@ -1517,6 +1724,7 @@ function bindUiEvents() {
 document.addEventListener('DOMContentLoaded', () => {
 
   bindUiEvents();
+  syncScanButtonMode();
   updatePeriodInput('cek-absen');
   updatePeriodInput('cek-area');
   // Ensure all serial inputs start STRICTLY EMPTY

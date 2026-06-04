@@ -205,6 +205,43 @@ Repo masih memuat terlalu banyak artifact audit lama, wrapper tooling yang dupli
 - Menegaskan `reports/` sebagai generated artifact, bukan dokumentasi arsitektur.
 - Menambahkan urutan baca kanonik di `README` dan dokumen arsitektur.
 
+## FASE 17: Hardening Scanner Kamera di Modul Gate
+
+**Tanggal**
+2026-06-04
+
+**Kondisi awal**
+Flow scanner kamera di web app sering gagal di Chrome mobile karena jalur aktif langsung bergantung ke `html5-qrcode`, sementara precheck izin/policy dan jalur native belum benar-benar dipakai.
+
+**Akar masalah**
+- `startNativeCameraScanner()` masih stub.
+- `openLiveScanner()` melewati helper permission/policy yang sudah ada.
+- fallback foto bergantung pada instance scanner live.
+- tombol tutup overlay scanner belum benar-benar tertangani di event binding.
+
+**Solusi**
+- Mengaktifkan jalur native live scan berbasis `getUserMedia + BarcodeDetector` sebagai prioritas pertama.
+- Menjadikan `html5-qrcode` sebagai fallback live scan.
+- Membuat fallback foto independen dari instance scanner live.
+- Menyambungkan aksi `close-qr` ke `stopQRScanner()`.
+
+## FASE 18: Fallback Kamera Foto Satu Tap untuk Chrome Mobile
+
+**Tanggal**
+2026-06-04
+
+**Kondisi awal**
+Walau jalur scanner sudah dihardening, web app GAS di Chrome mobile tetap bisa gagal membuka live camera karena sandbox wrapper host tidak mengizinkan fitur kamera di iframe.
+
+**Akar masalah**
+- Halaman Apps Script dibungkus iframe host yang tidak membawa izin `camera` pada attribute `allow`.
+- Akibatnya `getUserMedia` bisa gagal konsisten walau user membuka URL `/exec` langsung.
+
+**Solusi**
+- Menambahkan deteksi device mobile + policy block.
+- Mengalihkan tombol scan ke `capture="environment"` secara satu tap pada browser yang memang tidak bisa live scan.
+- Tetap mempertahankan jalur native live scan untuk browser yang mendukungnya.
+
 ## Langkah Lanjutan yang Masih Layak
 
 1. QA manual penuh untuk semua role live.

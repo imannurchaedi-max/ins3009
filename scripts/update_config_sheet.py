@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -13,6 +14,8 @@ SPREADSHEET_ID = "1jTsZixaANJd8Ijs3f66LwbXSBC9UcRoALLolEvxiz40"
 RANGE_NAME = "CONFIG_MODUL!A1:B5"
 DEPLOYMENT_LIMIT = 20
 KEEP_RECENT_DEPLOYMENTS = 12
+INJECTOR_POLL_ATTEMPTS = 12
+INJECTOR_POLL_DELAY_SECONDS = 2
 
 
 def load_access_token():
@@ -168,6 +171,26 @@ def build_temp_injector_code(gate_url, area_url, report_url):
 """
 
 
+def compact_text(value, limit=600):
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "...<truncated>"
+
+
+def wait_for_injector_response(url):
+    last_body = ""
+    for _ in range(INJECTOR_POLL_ATTEMPTS):
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(request) as response:
+            body = response.read().decode("utf-8", errors="replace")
+        last_body = body
+        if "OK_CONFIG_MODUL_UPDATED" in body or body.startswith("ERROR:"):
+            return body
+        time.sleep(INJECTOR_POLL_DELAY_SECONDS)
+    return last_body
+
+
 def fallback_update_via_temp_deploy(gate_url, area_url, report_url):
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     injector_dir = os.path.join(project_root, "active", "MODUL_GATE_PABRIK")
@@ -208,12 +231,10 @@ def fallback_update_via_temp_deploy(gate_url, area_url, report_url):
 
         deploy_id = match.group(1)
         url = f"https://script.google.com/macros/s/{deploy_id}/exec"
-        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(request) as response:
-            body = response.read().decode("utf-8", errors="replace")
+        body = wait_for_injector_response(url)
 
         if "OK_CONFIG_MODUL_UPDATED" not in body:
-            raise RuntimeError(f"Unexpected injector response: {body}")
+            raise RuntimeError(f"Unexpected injector response: {compact_text(body)}")
 
         return {
             "mode": "temp_deploy",
@@ -256,7 +277,7 @@ def main():
                     args.report_url,
                 )
             except Exception as fallback_err:
-                print(f"Fallback failed: {fallback_err}")
+                print("Fallback failed: " + compact_text(fallback_err).encode("ascii", errors="replace").decode("ascii"))
                 return 1
 
             print("CONFIG_MODUL updated via fallback.")

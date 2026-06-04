@@ -76,3 +76,5 @@ Keputusan hardening:
 3. Pastikan flow external masih menampilkan scanner.
 4. Pastikan `CONFIG_MODUL` ter-update setelah deploy.
 5. Pastikan tidak ada mismatch header pada sheet recap utama.
+6. Untuk scanner kamera, utamakan jalur native live scan jika `BarcodeDetector` tersedia, lalu fallback ke `html5-qrcode`.
+7. Pada Chrome mobile di dalam sandbox Apps Script, siapkan `capture="environment"` sebagai jalur scan praktis karena permission policy host bisa memblokir live camera sepenuhnya.

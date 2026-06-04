@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="UTF-8">
@@ -104,6 +104,14 @@
       <input type="text" id="masuk-nama-input" readonly style="background-color: #f5f5f5; color: #555;">
     </div>
     <div class="field" style="margin-bottom: 12px;">
+      <label>Departemen</label>
+      <input type="text" id="masuk-dept" readonly style="background-color: #f5f5f5; color: #555;">
+    </div>
+    <div class="field" style="margin-bottom: 16px;">
+      <label>Jabatan</label>
+      <input type="text" id="masuk-jabatan" readonly style="background-color: #f5f5f5; color: #555;">
+    </div>
+    <div class="field" style="margin-bottom: 12px;">
       <label>Cari berdasarkan NIK (Opsional)</label>
       <div class="autocomplete-wrap">
         <input type="text" id="masuk-nik-input" data-action="search-karyawan" data-context="masuk" placeholder="Masukkan NIK atau biarkan kosong" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">
@@ -119,11 +127,10 @@
   <div class="card" id="masuk-scanner-card">
     <div class="card-title">2. Scan Kartu MK / NIK</div>
 
-    <label class="btn btn-scan-qr" for="masuk-file-input" style="display:flex; width: 100%; margin-bottom: 16px; justify-content: center; cursor: pointer;">
+    <button class="btn btn-scan-qr" type="button" onclick="openLiveScanner('masuk')" style="display:flex; width: 100%; margin-bottom: 16px; justify-content: center; cursor: pointer; border: none; align-items:center;">
       <i class="bi bi-camera" style="font-size:28px; margin-right: 12px;"></i>
       <span>BUKA KAMERA (SCAN)</span>
-    </label>
-    <input type="file" id="masuk-file-input" accept="image/*" capture="environment" style="display:none" onchange="processQRImage(event, 'masuk')">
+    </button>
 
     <div class="divider">Input manual</div>
 
@@ -179,11 +186,10 @@
   <div class="card">
     <div class="card-title">Scan Kartu MK / NIK untuk Keluar</div>
 
-    <label class="btn btn-scan-qr" for="keluar-file-input" style="display:flex; width: 100%; margin-bottom: 16px; justify-content: center; cursor: pointer;">
+    <button class="btn btn-scan-qr" type="button" onclick="openLiveScanner('keluar')" style="display:flex; width: 100%; margin-bottom: 16px; justify-content: center; cursor: pointer; border: none; align-items:center;">
       <i class="bi bi-camera" style="font-size:28px; margin-right: 12px;"></i>
       <span>BUKA KAMERA (SCAN)</span>
-    </label>
-    <input type="file" id="keluar-file-input" accept="image/*" capture="environment" style="display:none" onchange="processQRImage(event, 'keluar')">
+    </button>
 
     <div class="divider">Input manual</div>
 
@@ -222,11 +228,10 @@
     <div class="card-title">Scan Kartu MK / NIK - Area Kerja</div>
     <p style="font-size:12px;color:#888;margin-bottom:16px">Security scan setiap karyawan keluar/masuk area kerja</p>
 
-    <label class="btn btn-scan-qr" for="security-file-input" style="display:flex; width: 100%; margin-bottom: 16px; justify-content: center; cursor: pointer;">
+    <button class="btn btn-scan-qr" type="button" onclick="openLiveScanner('security')" style="display:flex; width: 100%; margin-bottom: 16px; justify-content: center; cursor: pointer; border: none; align-items:center;">
       <i class="bi bi-camera" style="font-size:28px; margin-right: 12px;"></i>
       <span>BUKA KAMERA (SCAN)</span>
-    </label>
-    <input type="file" id="security-file-input" accept="image/*" capture="environment" style="display:none" onchange="processQRImage(event, 'security')">
+    </button>
 
     <div class="field" style="margin-bottom: 16px;">
       <label>Mode Scan</label>
@@ -246,12 +251,7 @@
       </div>
     </div>
 
-    <div class="field" style="margin-bottom: 16px;">
-      <label>Pilih Departemen Tujuan Area</label>
-      <select id="security-dept" class="form-select" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--dam-border);">
-        <option value="">-- Pilih Departemen --</option>
-      </select>
-    </div>
+
 
     <div class="field" style="margin-bottom: 16px;">
       <label>Pilih Keperluan / Catatan</label>

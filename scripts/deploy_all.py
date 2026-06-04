@@ -1,67 +1,47 @@
 import os
 import subprocess
 import re
-import sys
 
-base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-modules = ["HOME_PORTAL", "MODUL_GATE_PABRIK", "MODUL_AREA_KERJA", "MODUL_REPORT"]
+def deploy_module(name, path):
+    print(f"Deploying {name}...")
+    subprocess.run(["clasp", "push", "--force"], cwd=path, shell=True, check=True)
+    res = subprocess.run(["clasp", "deploy"], cwd=path, capture_output=True, text=True, shell=True, check=True)
+    match = re.search(r'Deployed ([a-zA-Z0-9_-]+) @\d+', res.stdout)
+    if not match:
+        raise Exception(f"Failed to parse deployment ID for {name}")
+    url = f"https://script.google.com/macros/s/{match.group(1)}/exec"
+    print(f"{name} deployed: {url}")
+    return url
 
-urls = {}
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--include-home', action='store_true', help='Include HOME_PORTAL in deployment')
+    args = parser.parse_args()
 
-def deploy_module(mod):
-    mod_dir = os.path.join(base_dir, mod)
-    print(f"Deploying {mod}...")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    active = os.path.join(root, 'active')
     
-    # Check if .clasp.json exists to avoid recreating if script reran
-    if not os.path.exists(os.path.join(mod_dir, ".clasp.json")):
-        subprocess.run(["clasp", "create", "--type", "webapp", "--title", f"DAM - {mod}"], cwd=mod_dir, shell=True)
+    # Deploy modules
+    gate_url = deploy_module("GATE_PABRIK", os.path.join(active, 'MODUL_GATE_PABRIK'))
+    area_url = deploy_module("AREA_KERJA", os.path.join(active, 'MODUL_AREA_KERJA'))
+    report_url = deploy_module("REPORT", os.path.join(active, 'MODUL_REPORT'))
     
-    subprocess.run(["clasp", "push", "--force"], cwd=mod_dir, shell=True)
+    home_url = None
+    if args.include_home:
+        home_url = deploy_module("HOME_PORTAL", os.path.join(active, 'HOME_PORTAL'))
     
-    res = subprocess.run(["clasp", "deploy", "--description", "Initial Microservices"], cwd=mod_dir, shell=True, capture_output=True, text=True)
-    out = res.stdout + res.stderr
-    print(out)
-    
-    # Extract Deployment ID: Deployed AKfycb... @10
-    match = re.search(r"Deployed ([a-zA-Z0-9_-]+) @\d+", out)
-    if match:
-        deployment_id = match.group(1)
-        url = f"https://script.google.com/macros/s/{deployment_id}/exec"
-        return url
-    else:
-        print(f"WARNING: Could not find Deployment ID for {mod}")
-        return None
+    # Update config
+    print("Updating config...")
+    cmd = [
+        "python", "scripts/update_config_sheet.py",
+        "--gate-url", gate_url,
+        "--area-url", area_url,
+        "--report-url", report_url
+    ]
+    if home_url:
+        cmd.extend(["--home-url", home_url])
+        
+    subprocess.run(cmd, cwd=root, check=True)
+    print("Done!")
 
-# 1. Deploy HOME_PORTAL first to get the URL
-home_url = deploy_module("HOME_PORTAL")
-urls["HOME_PORTAL"] = home_url
-
-# 2. Deploy others
-for mod in modules[1:]:
-    urls[mod] = deploy_module(mod)
-
-print("All Deployments Complete.")
-print("URLs:", urls)
-
-# 3. Update CONFIG_MODUL directly via Sheets API
-if home_url and all(urls.values()):
-    update_script = os.path.join(base_dir, "scripts", "update_config_sheet.py")
-    result = subprocess.run(
-        [
-            sys.executable,
-            update_script,
-            "--gate-url", urls["MODUL_GATE_PABRIK"],
-            "--area-url", urls["MODUL_AREA_KERJA"],
-            "--report-url", urls["MODUL_REPORT"],
-        ],
-        cwd=base_dir,
-        shell=True,
-        capture_output=True,
-        text=True
-    )
-    print(result.stdout)
-    if result.returncode != 0:
-        print(result.stderr)
-        print("Failed to update CONFIG_MODUL.")
-else:
-    print("Missing some URLs, skipping config injection.")

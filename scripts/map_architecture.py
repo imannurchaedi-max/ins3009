@@ -12,7 +12,7 @@ from langgraph.graph import StateGraph, START, END
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORTS_DIR = ROOT / "reports"
-CODE_GS = ROOT / "Code.js"
+CODE_GS = ROOT / "active" / "Code.js"
 
 class FunctionData(TypedDict):
     name: str

@@ -1,37 +1,62 @@
 // ============================================================
-//  NFC DAM ACCESS CONTROL SYSTEM
+//  NFC DAM ACCESS CONTROL SYSTEM — ROOT MODULE
 //  PT Daya Anugrah Mulya
 //  Google Apps Script - Backend
-//  Updated: Trigger Push
+//  Updated: 2026-06-03 (Refactored — utilities moved to SharedLib.gs)
+//  Dependencies: SharedLib.gs (all constants, utilities, auth, lookup)
 // ============================================================
 
-const SPREADSHEET_ID = '1jTsZixaANJd8Ijs3f66LwbXSBC9UcRoALLolEvxiz40';
-const SHEET_KARYAWAN          = 'KARYAWAN';
-const SHEET_MASUK_PABRIK      = 'REGISTRASI SAAT MASUK PABRIK';
-const SHEET_KELUAR_PABRIK     = 'REGISTRASI SAAT KELUAR PABRIK';
-const SHEET_AREA_KERJA        = 'REGISTRASI MASUK KELUAR AREA KERJA';
-const SHEET_BINDING           = 'BINDING_KARTU_MK';
-const SHEET_RECAP_ABSEN       = 'ABSEN IN OUT MK';
-
-const SHEET_HEADERS = {
-  [SHEET_KARYAWAN]: ['NIK','NAMA','TYPE KAYARAWAN','DEPT','JABATAN','USER LEVEL','PASSWORD'],
-  [SHEET_MASUK_PABRIK]: ['NO KARTU MK','NIK','NAMA','TANGGAL','JAM MASUK','SHIFT'],
-  [SHEET_KELUAR_PABRIK]: ['NO KARTU MK','NIK','NAMA','TANGGAL','JAM KELUAR','SHIFT'],
-  [SHEET_AREA_KERJA]: ['NO KARTU MK','INOUT','TANGGAL','JAM CATAT','NIK','NAMA','TUJUAN','CATATAN'],
-  [SHEET_BINDING]: ['NO_KARTU_MK','NIK','NAMA','DEPT','JABATAN','WAKTU_BIND','STATUS'],
-  [SHEET_RECAP_ABSEN]: ['TANGGAL','NIK','NAMA','DEPARTEMEN','JABATAN','JAM MASUK','JAM KELUAR','STATUS','NO KARTU MK','NO LOKER']
-};
-
-const OPTIONAL_SHEET_HEADERS = {
-  [SHEET_BINDING]: ['WAKTU_RELEASE'],
-  [SHEET_MASUK_PABRIK]: ['NO LOKER'],
-  [SHEET_KELUAR_PABRIK]: ['NO LOKER']
-};
+// ============================================================
+//  CONFIG MODUL UPDATER (run once after deploy all)
+// ============================================================
+function updateConfigModul() {
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName('CONFIG_MODUL');
+  if (!sheet) {
+    sheet = ss.insertSheet('CONFIG_MODUL');
+    sheet.appendRow(['NAMA_MODUL', 'LINK_MODUL']);
+    sheet.getRange("A1:B1").setFontWeight("bold");
+  }
+  
+  const urls = {
+    GATE_PABRIK: 'https://script.google.com/macros/s/1c0FSMDSbEq-1RJw5lrM4n_jeTJmnY91RNwKzn2-cOXYoDnmzoVXnOrCp/exec',
+    AREA_KERJA: 'https://script.google.com/macros/s/1UCEB_JhTT9BMP2ov9ifU2JVxT43I_5U8AqMuz5okZwU5oEd21Y86pMHk/exec',
+    REPORT: 'https://script.google.com/macros/s/16kVGhvtDyouiDaRGrnB4laINc9_wVQMFezVpGAtK8mpUFTN8x79ZV9V1/exec'
+  };
+  
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const name = asText(data[i][0]).toUpperCase();
+    if (urls[name]) {
+      sheet.getRange(i + 1, 2).setValue(urls[name]);
+    }
+  }
+  
+  for (const [name, url] of Object.entries(urls)) {
+    let found = false;
+    for (let i = 1; i < data.length; i++) {
+      if (asText(data[i][0]).toUpperCase() === name) found = true;
+    }
+    if (!found) {
+      sheet.appendRow([name, url]);
+    }
+  }
+  
+  return { ok: true, msg: 'CONFIG_MODUL updated!' };
+}
 
 // ============================================================
 //  ENTRY POINT - Web App
 // ============================================================
 function doGet(e) {
+  const action = (e && e.parameter && e.parameter.action) || '';
+  
+  if (action === 'updateConfigModul') {
+    const result = updateConfigModul();
+    return ContentService.createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  
   var template = HtmlService.createTemplateFromFile('Index');
   template.sessionNik = (e && e.parameter && e.parameter.nik) ? e.parameter.nik : '';
   return template
@@ -52,351 +77,9 @@ function onOpen() {
   }
 }
 
-function include(filename) {
-  return HtmlService.createHtmlOutputFromFile(filename).getContent();
-}
-
 // ============================================================
-//  UTILITAS
+//  RECAP ABSEN ENGINE (root-specific business logic)
 // ============================================================
-function asText(value) {
-  return value === null || value === undefined ? '' : value.toString();
-}
-
-function normalizeHeader(value) {
-  return asText(value).trim().toUpperCase().replace(/[\s_]+/g, '');
-}
-
-function normalizeCard(value) {
-  return asText(value).trim().toUpperCase();
-}
-
-function getSpreadsheet() {
-  return SpreadsheetApp.openById(SPREADSHEET_ID);
-}
-
-function ensureHeader(sheet, headers) {
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(headers);
-    sheet.setFrozenRows(1);
-    return;
-  }
-
-  const range = sheet.getRange(1, 1, 1, headers.length);
-  let existing = range.getValues()[0].map(asText);
-  const writable = [];
-
-  headers.forEach(function(header, index) {
-    const current = existing[index];
-    if (!normalizeHeader(current) && header) {
-      writable.push({ col: index + 1, value: header });
-      existing[index] = header;
-    }
-  });
-
-  writable.forEach(function(item) {
-    sheet.getRange(1, item.col).setValue(item.value);
-  });
-
-  const mismatches = [];
-  headers.forEach(function(header, index) {
-    if (normalizeHeader(existing[index]) !== normalizeHeader(header)) {
-      mismatches.push(
-        'kolom ' + (index + 1) + ' aktual "' + (existing[index] || '-') + '", harus "' + header + '"'
-      );
-    }
-  });
-  if (mismatches.length) {
-    throw new Error('Header sheet tidak sesuai: ' + sheet.getName() + ' (' + mismatches.join('; ') + ')');
-  }
-}
-
-function ensureOptionalHeaders(sheet, headers) {
-  if (!headers || !headers.length) return;
-
-  const lastColumn = Math.max(sheet.getLastColumn(), 1);
-  const currentHeaders = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(asText);
-  const normalized = currentHeaders.map(normalizeHeader);
-
-  headers.forEach(function(header) {
-    if (normalized.indexOf(normalizeHeader(header)) === -1) {
-      sheet.getRange(1, sheet.getLastColumn() + 1).setValue(header);
-      normalized.push(normalizeHeader(header));
-    }
-  });
-}
-
-function getHeaderIndex(sheet, header) {
-  const lastColumn = Math.max(sheet.getLastColumn(), 1);
-  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(normalizeHeader);
-  return headers.indexOf(normalizeHeader(header)) + 1;
-}
-
-function getSheet(name) {
-  const ss = getSpreadsheet();
-  const headers = SHEET_HEADERS[name];
-  if (!headers) throw new Error('Sheet tidak terdaftar: ' + name);
-
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
-  }
-  ensureHeader(sheet, headers);
-  ensureOptionalHeaders(sheet, OPTIONAL_SHEET_HEADERS[name]);
-  return sheet;
-}
-
-function nowWIB() {
-  return new Date();
-}
-
-function formatDate(d) {
-  return Utilities.formatDate(d, 'Asia/Jakarta', 'dd/MM/yyyy');
-}
-
-function formatTime(d) {
-  return Utilities.formatDate(d, 'Asia/Jakarta', 'HH:mm:ss');
-}
-
-function formatDateTime(d) {
-  return Utilities.formatDate(d, 'Asia/Jakarta', 'dd/MM/yyyy HH:mm:ss');
-}
-
-function parseIsoDate(value) {
-  const parts = asText(value).trim().split('-').map(function(part) { return parseInt(part, 10); });
-  if (parts.length !== 3 || parts.some(isNaN)) return null;
-  return new Date(parts[0], parts[1] - 1, parts[2]);
-}
-
-function parseSheetDate(value) {
-  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
-    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
-  }
-
-  const text = asText(value).trim();
-  let parts = text.split('/');
-  if (parts.length === 3) {
-    const d = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
-    return isNaN(d.getTime()) ? null : d;
-  }
-
-  parts = text.split('-');
-  if (parts.length === 3) {
-    const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-    return isNaN(d.getTime()) ? null : d;
-  }
-
-  return null;
-}
-
-function formatDateForSort(value) {
-  const d = parseSheetDate(value);
-  return d ? Utilities.formatDate(d, 'Asia/Jakarta', 'yyyyMMdd') : asText(value);
-}
-
-function getPeriodRange(periodType, periodValue) {
-  const type = asText(periodType).trim().toLowerCase();
-  const value = asText(periodValue).trim();
-  let start;
-  let end;
-
-  if (type === 'date') {
-    start = parseIsoDate(value);
-    if (!start) throw new Error('Tanggal tidak valid.');
-    end = new Date(start);
-  } else if (type === 'month') {
-    const parts = value.split('-').map(function(part) { return parseInt(part, 10); });
-    if (parts.length !== 2 || parts.some(isNaN)) throw new Error('Bulan tidak valid.');
-    start = new Date(parts[0], parts[1] - 1, 1);
-    end = new Date(parts[0], parts[1], 0);
-  } else if (type === 'week') {
-    const match = value.match(/^(\d{4})-W(\d{2})$/);
-    if (!match) throw new Error('Minggu tidak valid.');
-    const year = parseInt(match[1], 10);
-    const week = parseInt(match[2], 10);
-    const jan4 = new Date(year, 0, 4);
-    const jan4Day = jan4.getDay() || 7;
-    start = new Date(jan4);
-    start.setDate(jan4.getDate() - jan4Day + 1 + ((week - 1) * 7));
-    end = new Date(start);
-    end.setDate(start.getDate() + 6);
-  } else {
-    throw new Error('Tipe periode tidak dikenal.');
-  }
-
-  return {
-    type,
-    value,
-    start,
-    end,
-    label: formatDate(start) + ' - ' + formatDate(end)
-  };
-}
-
-function isDateInRange(value, range) {
-  const date = parseSheetDate(value);
-  if (!date) return false;
-  return date.getTime() >= range.start.getTime() && date.getTime() <= range.end.getTime();
-}
-
-function detectShift(d) {
-  const h = parseInt(Utilities.formatDate(d, 'Asia/Jakarta', 'HH'), 10);
-  if (h >= 6 && h < 14)  return 'Shift 1';
-  if (h >= 14 && h < 22) return 'Shift 2';
-  return 'Shift 3';
-}
-
-function withDocumentLock(work) {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) {
-    return { ok: false, msg: 'Sistem sedang memproses scan lain. Coba lagi beberapa detik.' };
-  }
-  try {
-    return work();
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function assertCard(noKartuMK) {
-  const no = normalizeCard(noKartuMK);
-  if (!no) throw new Error('Nomor kartu MK kosong.');
-  if (!/^[A-Z0-9_-]{3,32}$/.test(no)) throw new Error('Format nomor kartu MK / NIK tidak valid.');
-  return no;
-}
-
-function isExternalKaryawan(karyawan) {
-  const marker = [
-    karyawan && karyawan.type,
-    karyawan && karyawan.dept,
-    karyawan && karyawan.jabatan
-  ].join(' ').toUpperCase();
-
-  return [
-    'MITRA',
-    'VISITOR',
-    'TAMU',
-    'EXTERNAL',
-    'EKSTERNAL',
-    'VENDOR',
-    'KONTRAKTOR',
-    'OUTSOURCE',
-    'OUTSOURCING'
-  ].some(function(keyword) {
-    return marker.indexOf(keyword) !== -1;
-  });
-}
-
-function makeKaryawanPayload(k) {
-  const role = k.userLevel || 'KARYAWAN';
-  return {
-    nik: k.nik,
-    nama: k.nama,
-    type: k.type,
-    dept: k.dept,
-    jabatan: k.jabatan,
-    role: role,
-    isExternal: isExternalKaryawan(k)
-  };
-}
-
-function getAvailableDepts(karyawanMap) {
-  const deptSet = {};
-  const availableDepts = [];
-  for (const key in karyawanMap) {
-    const d = (karyawanMap[key].dept || '').trim();
-    if (d && !deptSet[d]) {
-      deptSet[d] = true;
-      availableDepts.push(d);
-    }
-  }
-  availableDepts.sort();
-  return availableDepts;
-}
-
-function getFactoryRecapStatus(nik, tanggal) {
-  const sheet = getSheet(SHEET_RECAP_ABSEN);
-  const lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return '';
-
-  const key = makeRecapKey(tanggal, nik);
-  const data = sheet.getRange(2, 1, lastRow - 1, SHEET_HEADERS[SHEET_RECAP_ABSEN].length).getValues();
-  for (let i = 0; i < data.length; i++) {
-    if (makeRecapKey(data[i][0], data[i][1]) === key) {
-      return asText(data[i][7]);
-    }
-  }
-  return '';
-}
-
-function getKaryawanMapByNIK() {
-  const sheet = getSheet(SHEET_KARYAWAN);
-  const data = sheet.getDataRange().getValues();
-  const map = {};
-
-  for (let i = 1; i < data.length; i++) {
-    const nik = asText(data[i][0]).trim();
-    if (!nik) continue;
-    map[nik] = {
-      nik,
-      nama: asText(data[i][1]),
-      type: asText(data[i][2]),
-      dept: asText(data[i][3]),
-      jabatan: asText(data[i][4]),
-      userLevel: asText(data[i][5]).toUpperCase(),
-      password: asText(data[i][6])
-    };
-  }
-
-  return map;
-}
-
-function verifyLogin(nik, password) {
-  const karyawanMap = getKaryawanMapByNIK();
-  const k = karyawanMap[nik];
-  
-  if (!k) {
-    return { ok: false, msg: 'NIK tidak ditemukan di database.' };
-  }
-  
-  // Jika di database ada password yang diset, cocokkan.
-  if (k.password && k.password !== password) {
-    return { ok: false, msg: 'Password salah.' };
-  }
-  
-  return { 
-    ok: true, 
-    karyawan: makeKaryawanPayload(k),
-    depts: getAvailableDepts(karyawanMap)
-  };
-}
-
-function verifySession(nik) {
-  const karyawanMap = getKaryawanMapByNIK();
-  const k = karyawanMap[nik];
-
-  if (!k) {
-    return { ok: false, msg: 'NIK tidak ditemukan di database.' };
-  }
-
-  return {
-    ok: true,
-    karyawan: makeKaryawanPayload(k),
-    depts: getAvailableDepts(karyawanMap)
-  };
-}
-
-function getRecapStatus(jamMasuk, jamKeluar) {
-  if (jamMasuk && jamKeluar) return 'SELESAI';
-  if (jamMasuk) return 'DI DALAM';
-  if (jamKeluar) return 'KELUAR TANPA MASUK';
-  return '';
-}
-
-function makeRecapKey(tanggal, nik) {
-  return asText(tanggal).trim() + '|' + asText(nik).trim();
-}
-
 function updateRecapAbsen(tanggal, nik, nama, dept, jabatan, jamMasuk, jamKeluar, noKartuMK, noLoker) {
   const sheet = getSheet(SHEET_RECAP_ABSEN);
   const lastRow = sheet.getLastRow();
@@ -449,7 +132,13 @@ function safeUpdateRecapAbsen(tanggal, nik, nama, dept, jabatan, jamMasuk, jamKe
   }
 }
 
-function rebuildRecapAbsenInOutMK() {
+function rebuildRecapAbsenInOutMK(nik) {
+  // Admin-only guard
+  if (nik) {
+    const auth = guardAdmin(nik);
+    if (!auth.ok) return auth;
+  }
+
   return withDocumentLock(function() {
     try {
       const recapSheet = getSheet(SHEET_RECAP_ABSEN);
@@ -630,6 +319,8 @@ function getAreaActivityReport(nik, deptFilter, periodType, periodValue) {
       
       if (filterDpt && rowDept !== filterDpt) continue;
 
+
+
       const inout = asText(data[i][1]);
       if (inout === 'IN') inCount++;
       if (inout === 'OUT') outCount++;
@@ -666,56 +357,8 @@ function getAreaActivityReport(nik, deptFilter, periodType, periodValue) {
 // ============================================================
 //  1. LOOKUP KARYAWAN
 // ============================================================
-function searchKaryawan(query) {
-  try {
-    const sheet = getSheet(SHEET_KARYAWAN);
-    const data  = sheet.getDataRange().getValues();
-    const q     = asText(query).toLowerCase().trim();
-    const result = [];
-
-    if (q.length < 2) return { ok: true, data: [] };
-
-    for (let i = 1; i < data.length; i++) {
-      const nik     = asText(data[i][0]);
-      const nama    = asText(data[i][1]);
-      const type    = asText(data[i][2]);
-      const dept    = asText(data[i][3]);
-      const jabatan = asText(data[i][4]);
-
-      if (nik.toLowerCase().includes(q) || nama.toLowerCase().includes(q)) {
-        result.push({ nik, nama, type, dept, jabatan, isExternal: isExternalKaryawan({ type, dept, jabatan }) });
-        if (result.length >= 20) break;
-      }
-    }
-    return { ok: true, data: result };
-  } catch(e) {
-    return { ok: false, msg: e.message };
-  }
-}
-
-function getKaryawanByNIK(nik) {
-  const target = asText(nik).trim();
-  if (!target) return null;
-
-  const sheet = getSheet(SHEET_KARYAWAN);
-  const data  = sheet.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) {
-    if (asText(data[i][0]).trim() === target) {
-      return {
-        nik: asText(data[i][0]),
-        nama: asText(data[i][1]),
-        type: asText(data[i][2]),
-        dept: asText(data[i][3]),
-        jabatan: asText(data[i][4]),
-        userLevel: asText(data[i][5]).toUpperCase()
-      };
-    }
-  }
-  return null;
-}
-
 // ============================================================
-//  2. BINDING KARTU MK
+//  BINDING KARTU MK (root-specific business logic)
 // ============================================================
 function getBindingStatus(noKartuMK) {
   try {
@@ -814,7 +457,14 @@ function bindKartu(noKartuMK, nik, loker) {
       if (existing.status === 'BOUND') {
         return {
           ok: false,
-          msg: `Kartu ${no} sudah terikat dengan ${existing.nama}. Lepaskan dulu sebelum mengikat ulang.`
+          msg: `Kartu ${no} sudah terikat dengan ${existing.nama}. Lepaskan dulu sebelum mengikat ulang.`,
+          htmlMsg: `❌ Kartu <strong>${no}</strong> masih terikat!<br>
+                    <div style="margin-top:8px; padding:8px; background:rgba(255,255,255,0.7); border-radius:4px; color:#333; font-size:13px; text-align:left; border-left:3px solid #dc3545;">
+                      <strong>${escHtml(existing.nama)}</strong> (${escHtml(existing.nik)})<br>
+                      ${escHtml(existing.dept || '-')} · ${escHtml(existing.jabatan || '-')}<br>
+                      <span style="font-size:11px; color:#666;">Sejak: ${escHtml(existing.waktuBind || '-')}</span>
+                    </div>
+                    <div style="margin-top:6px; font-size:12px; color:#dc3545;">Harap selesaikan proses KELUAR pabrik terlebih dahulu.</div>`
         };
       }
 
@@ -991,9 +641,11 @@ function scanAreaKerja(noKartuMK, tujuan, catatan, forceMode) {
         formatTime(now),
         kar.nik,
         kar.nama,
-        tujuan || '',
-        catatan || ''
+        kar.dept || '',
+        kar.jabatan || ''
       ]);
+
+
 
       return {
         ok: true,

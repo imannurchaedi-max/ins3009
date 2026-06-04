@@ -3,7 +3,7 @@
 
 <div class="qr-overlay" id="qr-overlay" role="dialog" aria-modal="true" aria-labelledby="qr-title">
   <div class="qr-header">
-    <h3 id="qr-title">Scan QR / Barcode</h3>
+    <h3 id="qr-title">📷 Scan QR / Barcode</h3>
     <p>Arahkan kamera ke QR Code atau Barcode kartu MK / NIK</p>
   </div>
   <div class="qr-viewport">
@@ -12,7 +12,10 @@
   <div class="qr-result-text" id="qr-result-text"></div>
   <div class="qr-loading" id="qr-loading"></div>
   <div class="qr-diagnostic" id="qr-diagnostic"></div>
-  <button class="qr-close-btn" id="qr-close-btn" data-action="close-qr" type="button">TUTUP</button>
+  
+  <input type="file" id="qr-fallback-input" accept="image/*" capture="environment" style="display:none;" onchange="handleFallbackImage(event)">
+  <button class="qr-close-btn" id="qr-fallback-btn" type="button" style="background:#0077b6; margin-bottom:10px; display:none;" onclick="document.getElementById('qr-fallback-input').click()">📸 AMBIL FOTO</button>
+  <button class="qr-close-btn" id="qr-close-btn" data-action="close-qr" type="button">✕ TUTUP</button>
 </div>
 
 <div class="scan-toast" id="scan-toast" role="status" aria-live="polite"></div>
@@ -36,7 +39,7 @@ const QR = {
 // ── State ──────────────────────────────────────────────────
 const STATE = {
   currentUser: null,
-  masuk:    { selectedNIK: null, selectedNama: null, selectedType: null, selectedDept: null, selectedJabatan: null, scannedSerial: null, completed: false },
+  masuk:    { selectedNIK: null, selectedNama: null, selectedDept: null, selectedJabatan: null, scannedSerial: null },
   keluar:   { scannedSerial: null, bindingData: null },
   security: { scannedSerial: null }
 };
@@ -51,108 +54,6 @@ const REQUEST_BUSY = {
 const REPORT_CACHE = {
   absen: null
 };
-
-function getIncomingSessionNik() {
-  if (typeof GLOBAL_SESSION_NIK === 'undefined') return '';
-  return String(GLOBAL_SESSION_NIK || '').trim();
-}
-
-function setLoginUiMode(mode, message) {
-  const loginPage = document.getElementById('page-login');
-  const loginForm = document.getElementById('login-form-content');
-  const sessionBootstrap = document.getElementById('session-bootstrap');
-  if (!loginPage || !loginForm || !sessionBootstrap) return;
-
-  if (mode === 'bootstrapping') {
-    loginPage.style.display = 'flex';
-    loginPage.classList.add('active');
-    loginForm.style.display = 'none';
-    sessionBootstrap.style.display = 'block';
-    sessionBootstrap.textContent = message || 'Memuat sesi dari Home Portal...';
-    return;
-  }
-
-  sessionBootstrap.style.display = 'none';
-  loginForm.style.display = 'block';
-  loginPage.style.display = 'flex';
-  loginPage.classList.add('active');
-}
-
-function hydrateAuthenticatedUser(user, depts) {
-  STATE.currentUser = user;
-  if (Array.isArray(depts) && depts.length) STATE.availableDepts = depts;
-
-  localStorage.setItem('dam_session', JSON.stringify(user));
-
-  const deptSelect = document.getElementById('security-dept');
-  if (deptSelect && STATE.availableDepts.length) {
-    deptSelect.innerHTML = '<option value="">-- Pilih Departemen --</option>';
-    STATE.availableDepts.forEach(d => {
-      const opt = document.createElement('option');
-      opt.value = d;
-      opt.textContent = d;
-      deptSelect.appendChild(opt);
-    });
-  }
-
-  STATE.masuk.selectedNIK = user.nik;
-  STATE.masuk.selectedNama = user.nama;
-  STATE.masuk.selectedType = user.type;
-  STATE.masuk.selectedDept = user.dept;
-  STATE.masuk.selectedJabatan = user.jabatan;
-  STATE.masuk.completed = false;
-
-  const inNik = document.getElementById('masuk-nik');
-  const inNama = document.getElementById('masuk-nama-input');
-  if (inNik) inNik.value = user.nik;
-  if (inNama) inNama.value = user.nama;
-
-  applyRolePermissions(user.role);
-  updateMasukScannerVisibility();
-}
-
-function restoreSavedSession() {
-  const savedSession = localStorage.getItem('dam_session');
-  if (!savedSession) return false;
-
-  try {
-    const user = JSON.parse(savedSession);
-    hydrateAuthenticatedUser(user, STATE.availableDepts);
-    return true;
-  } catch (e) {
-    localStorage.removeItem('dam_session');
-    return false;
-  }
-}
-
-function beginModuleAutoLogin(sessionNik) {
-  const nik = (sessionNik || getIncomingSessionNik()).trim();
-  if (!nik) return false;
-
-  STATE.authBootPending = true;
-  setLoginUiMode('bootstrapping', 'Memuat sesi dari Home Portal...');
-
-  google.script.run
-    .withFailureHandler(err => {
-      STATE.authBootPending = false;
-      if (!restoreSavedSession()) {
-        setLoginUiMode('login');
-        showScanToast('Gagal memverifikasi sesi: ' + getErrorMessage(err));
-      }
-    })
-    .withSuccessHandler(res => {
-      STATE.authBootPending = false;
-      if (res && res.ok) {
-        applyAuthenticatedSession(res);
-      } else if (!restoreSavedSession()) {
-        setLoginUiMode('login');
-        showScanToast((res && res.msg) || 'Sesi tidak valid.');
-      }
-    })
-    .verifySession(nik);
-
-  return true;
-}
 
 // ── AUTHENTICATION ─────────────────────────────────────────
 function applyRolePermissions(role) {
@@ -230,6 +131,152 @@ function handleLoginSubmit() {
       btn.classList.remove('pulse-anim');
       btn.innerHTML = 'MASUK';
       showScanToast('Error koneksi: ' + err.message);
+<!-- html5-qrcode CDN -->
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+
+<div class="qr-overlay" id="qr-overlay" role="dialog" aria-modal="true" aria-labelledby="qr-title">
+  <div class="qr-header">
+    <h3 id="qr-title">📷 Scan QR / Barcode</h3>
+    <p>Arahkan kamera ke QR Code atau Barcode kartu MK / NIK</p>
+  </div>
+  <div class="qr-viewport">
+    <div id="qr-reader"></div>
+  </div>
+  <div class="qr-result-text" id="qr-result-text"></div>
+  <div class="qr-loading" id="qr-loading"></div>
+  <div class="qr-diagnostic" id="qr-diagnostic"></div>
+  
+  <input type="file" id="qr-fallback-input" accept="image/*" capture="environment" style="display:none;" onchange="handleFallbackImage(event)">
+  <button class="qr-close-btn" id="qr-fallback-btn" type="button" style="background:#0077b6; margin-bottom:10px; display:none;" onclick="document.getElementById('qr-fallback-input').click()">📸 AMBIL FOTO</button>
+  <button class="qr-close-btn" id="qr-close-btn" data-action="close-qr" type="button">✕ TUTUP</button>
+</div>
+
+<div class="scan-toast" id="scan-toast" role="status" aria-live="polite"></div>
+
+<script>
+// ── QR Scanner State ──────────────────────────────────────
+const QR = {
+  html5QrCode: null,
+  stream: null,
+  video: null,
+  detector: null,
+  scanFrame: null,
+  isScanning: false,
+  isStarting: false,
+  isStopping: false,
+  context: null,
+  usingNative: false,
+  successHandled: false
+};
+
+// ── State ──────────────────────────────────────────────────
+const STATE = {
+  currentUser: null,
+  masuk:    { selectedNIK: null, selectedNama: null, selectedDept: null, selectedJabatan: null, scannedSerial: null },
+  keluar:   { scannedSerial: null, bindingData: null },
+  security: { scannedSerial: null }
+};
+
+const REQUEST_BUSY = {
+  masukConfirm: false,
+  keluarScan: false,
+  keluarConfirm: false,
+  securityScan: false
+};
+
+const REPORT_CACHE = {
+  absen: null
+};
+
+// ── AUTHENTICATION ─────────────────────────────────────────
+function applyRolePermissions(role) {
+  const TABS = {
+    'masuk': ['ADMINISTRATOR', 'SECURITY', 'KARYAWAN'],
+    'keluar': ['ADMINISTRATOR', 'SECURITY', 'KARYAWAN'],
+    'security': ['SECURITY', 'PENGAWAS'], 
+    'dashboard': ['ADMINISTRATOR', 'PENGAWAS'],
+    'cek-absen': ['ADMINISTRATOR', 'PENGAWAS', 'SECURITY', 'KARYAWAN'],
+    'cek-area': ['ADMINISTRATOR', 'PENGAWAS', 'SECURITY'],
+    'export-laporan': ['ADMINISTRATOR'],
+    'revisi-catatan': ['ADMINISTRATOR']
+  };
+
+  let defaultTab = null;
+  const validRoles = ['ADMINISTRATOR', 'PENGAWAS', 'SECURITY'];
+  const roleKey = validRoles.includes(role) ? role : 'KARYAWAN';
+
+  // Default tabs
+  if (roleKey === 'ADMINISTRATOR') defaultTab = 'dashboard';
+  else if (roleKey === 'PENGAWAS') defaultTab = 'cek-absen';
+  else if (roleKey === 'SECURITY') defaultTab = 'security';
+  else defaultTab = 'masuk';
+
+  for (const tab in TABS) {
+    const btn = document.getElementById('tab-btn-' + tab);
+    if (TABS[tab].includes(roleKey)) {
+      if (btn) btn.style.display = 'flex';
+    } else {
+      if (btn) btn.style.display = 'none';
+    }
+  }
+
+  const userNameEl = document.getElementById('header-user-name');
+  if (userNameEl && STATE.currentUser) {
+    const firstName = (STATE.currentUser.nama || 'User').split(' ')[0];
+    userNameEl.textContent = firstName + ' (' + roleKey + ')';
+    
+    const absenNik = document.getElementById('cek-absen-nik');
+    if (absenNik && roleKey === 'KARYAWAN') {
+      absenNik.value = STATE.currentUser.nik;
+      absenNik.disabled = true;
+    }
+    
+    const masukSearch = document.getElementById('masuk-nik-input');
+    if (masukSearch) {
+      if (roleKey === 'KARYAWAN') {
+         masukSearch.disabled = true;
+         masukSearch.placeholder = "Pencarian dinonaktifkan khusus Karyawan";
+         masukSearch.style.backgroundColor = "#e9ecef";
+      } else {
+         masukSearch.disabled = false;
+         masukSearch.placeholder = "Masukkan NIK atau biarkan kosong";
+         masukSearch.style.backgroundColor = "";
+      }
+    }
+  }
+
+  // Switch to default tab
+  if (defaultTab) switchTab(defaultTab);
+  
+  // Show header and tab bar
+  document.getElementById('app-header').style.display = 'flex';
+  document.getElementById('app-tabbar').style.display = 'flex';
+  
+  // Hide login page
+  document.getElementById('page-login').classList.remove('active');
+  document.getElementById('page-login').style.display = 'none';
+}
+
+function handleLoginSubmit() {
+  const nik = (document.getElementById('login-nik').value || '').trim();
+  const pwd = (document.getElementById('login-password').value || '').trim();
+  
+  if (!nik) {
+    showScanToast("NIK wajib diisi.");
+    return;
+  }
+  
+  const btn = document.querySelector('.btn-login');
+  btn.classList.add('pulse-anim');
+  btn.innerHTML = 'MASUK...';
+  btn.disabled = true;
+  
+  google.script.run
+    .withFailureHandler(err => {
+      btn.disabled = false;
+      btn.classList.remove('pulse-anim');
+      btn.innerHTML = 'MASUK';
+      showScanToast('Error koneksi: ' + err.message);
     })
     .withSuccessHandler(res => {
       btn.disabled = false;
@@ -239,13 +286,34 @@ function handleLoginSubmit() {
         showScanToast(res.msg);
         return;
       }
-      applyAuthenticatedSession(res);
+      
+      STATE.currentUser = res.karyawan;
+      if (res.depts) STATE.availableDepts = res.depts;
+      
+      localStorage.setItem('dam_session', JSON.stringify(res.karyawan));
+      
+      // Populate security-dept dropdown
+      
+      
+      // Auto-populate for MASUK tab
+      STATE.masuk.selectedNIK = res.karyawan.nik;
+      STATE.masuk.selectedNama = res.karyawan.nama;
+      STATE.masuk.selectedDept = res.karyawan.dept;
+      STATE.masuk.selectedJabatan = res.karyawan.jabatan;
+      
+      const inNik = document.getElementById('masuk-nik');
+      const inNama = document.getElementById('masuk-nama-input');
+      const inDept = document.getElementById('masuk-dept');
+      const inJabatan = document.getElementById('masuk-jabatan');
+      if (inNik) inNik.value = res.karyawan.nik;
+      if (inNama) inNama.value = res.karyawan.nama;
+      if (inDept) inDept.value = res.karyawan.dept || '';
+      if (inJabatan) inJabatan.value = res.karyawan.jabatan || '';
+
+      applyRolePermissions(res.karyawan.role);
+      updateMasukScannerVisibility();
     })
     .verifyLogin(nik, pwd);
-}
-
-function applyAuthenticatedSession(res) {
-  hydrateAuthenticatedUser(res.karyawan, res.depts);
 }
 
 // ── Tab switching ──────────────────────────────────────────
@@ -254,174 +322,65 @@ async function switchTab(tab) {
   const overlay = document.getElementById('sidebar-overlay');
   if (tabbar) tabbar.classList.remove('open');
   if (overlay) overlay.classList.remove('active');
-  // Stop any active QR scanner when switching tabs
-  if (QR.isScanning || QR.isStarting) await stopQRScanner();
 
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('page-' + tab).classList.add('active');
-  document.querySelectorAll('.tab-btn')[['masuk','keluar','security','dashboard','cek-absen','cek-area'].indexOf(tab)].classList.add('active');
-
-  // Reset all serial inputs to strictly EMPTY on every tab switch
-  resetAllSerialInputs();
-  // Clear any stale state for non-active contexts
-  const contexts = ['masuk', 'keluar', 'security'];
-  contexts.forEach(ctx => {
-    const resultEl = document.getElementById(ctx + '-result');
-    if (resultEl) { resultEl.className = 'result-card'; resultEl.innerHTML = ''; }
-  });
-
-  if (tab === 'dashboard') loadDashboard();
-  if (tab === 'security')  loadRecentLogs();
-}
-
-// ── Debounce search ────────────────────────────────────────
-let searchTimer = null;
-function debounceSearch(q, context) {
-  clearTimeout(searchTimer);
-  if (q.length < 2) { closeList(context); return; }
-  searchTimer = setTimeout(() => doSearch(q, context), 400);
-}
-
-function doSearch(q, context) {
-  google.script.run
-    .withFailureHandler(err => handleGasFailure(context, err))
-    .withSuccessHandler(res => renderList(res, context))
-    .searchKaryawan(q);
-}
-
-function renderList(res, context) {
-  const list = document.getElementById(context + '-list');
-  if (!list) return;
-  list.innerHTML = '';
-  if (!res.ok) { showResult(context, 'error', 'Gagal mencari karyawan: ' + escHtml(res.msg)); return; }
-  if (!res.data.length) { list.style.display='none'; return; }
-
-  res.data.forEach(k => {
-    const item = document.createElement('div');
-    const name = document.createElement('div');
-    const detail = document.createElement('div');
-    item.className = 'autocomplete-item';
-    name.textContent = k.nama || '-';
-    detail.className = 'item-nik';
-    detail.textContent = `${k.nik || '-'} - ${k.dept || '-'} - ${k.jabatan || '-'}`;
-    item.addEventListener('click', () => selectKaryawan(context, k.nik || '', k.nama || '', k.type || '', k.dept || '', k.jabatan || ''));
-    item.appendChild(name);
-    item.appendChild(detail);
-    list.appendChild(item);
-  });
-  list.style.display = 'block';
-}
-
-function closeList(context) {
-  const el = document.getElementById(context + '-list');
-  if (el) el.style.display = 'none';
-}
-
-function selectKaryawan(context, nik, nama, type, dept, jabatan) {
-  STATE[context].selectedNIK     = nik;
-  STATE[context].selectedNama    = nama;
-  STATE[context].selectedType    = type;
-  STATE[context].selectedDept    = dept;
-  STATE[context].selectedJabatan = jabatan;
-  if (context === 'masuk') STATE.masuk.completed = false;
-
-  const searchInput = document.getElementById(context + '-search') || document.getElementById(context + '-nik-input');
-  if (searchInput) searchInput.value = nama + ' (' + nik + ')';
-  const nikInput = document.getElementById(context + '-nik');
-  const namaInput = document.getElementById(context + '-nama-input');
-  if (nikInput) nikInput.value = nik;
-  if (namaInput) namaInput.value = nama;
-  closeList(context);
-
-  const info = document.getElementById(context + '-karyawan-info');
-  if (info) {
-    document.getElementById(context + '-avatar').textContent = nama.charAt(0);
-    document.getElementById(context + '-nama').textContent   = nama;
-    document.getElementById(context + '-detail').textContent = nik + ' - ' + dept + ' - ' + jabatan;
-    document.getElementById(context + '-type').textContent   = type || 'KARYAWAN';
-    info.style.display = 'block';
+  if (typeof QR !== 'undefined' && (QR.isScanning || QR.isStarting)) {
+    if (typeof stopQRScanner === 'function') await stopQRScanner();
   }
 
-  updateMasukScannerVisibility();
-}
+  const token = '?nik=' + (STATE.currentUser ? STATE.currentUser.nik : '');
+  
+  google.script.run.withSuccessHandler(urls => {
+    let targetUrl = '';
+    let isLocal = false;
 
-// ── Manual serial submit ────────────────────────────────────
-function submitSerial(context) {
-  const val = normalizeSerial(document.getElementById(context + '-serial').value);
-  if (!val) { showResult(context, 'error', 'Masukkan nomor kartu MK / NIK terlebih dahulu.'); return; }
-  if (!isValidSerial(val)) { showResult(context, 'error', 'Format nomor kartu MK / NIK tidak valid.'); return; }
-  onSerialScanned(context, val);
-}
-
-// ── On serial received (NFC or manual) ────────────────────
-function onSerialScanned(context, serial) {
-  serial = normalizeSerial(serial);
-  if (!isValidSerial(serial)) {
-    showResult(context, 'error', 'Format nomor kartu MK / NIK tidak valid.');
-    return;
-  }
-  document.getElementById(context + '-serial').value = serial;
-
-  if (context === 'masuk') {
-    STATE.masuk.completed = false;
-    STATE.masuk.scannedSerial = serial;
-    const display = document.getElementById('masuk-card-display');
-    document.getElementById('masuk-card-num').textContent = serial;
-    display.style.display = 'block';
-    checkMasukReady();
-    if (STATE.masuk.selectedNIK) {
-      confirmMasuk(); // Auto submit if NIK is already selected
+    if (tab === 'dashboard') {
+      if (document.getElementById('page-dashboard')) isLocal = true;
+      else targetUrl = urls.HOME_PORTAL;
+    } 
+    else if (tab === 'masuk' || tab === 'keluar') {
+      if (document.getElementById('page-masuk')) isLocal = true;
+      else targetUrl = urls.GATE_PABRIK;
+    }
+    else if (tab === 'security') {
+      if (document.getElementById('page-security')) isLocal = true;
+      else targetUrl = urls.AREA_KERJA;
+    }
+    else if (tab.includes('cek') || tab.includes('export')) {
+      if (document.getElementById('page-cek-absen')) isLocal = true;
+      else targetUrl = urls.REPORT;
     }
 
-  } else if (context === 'keluar') {
-    if (REQUEST_BUSY.keluarScan) return;
-    REQUEST_BUSY.keluarScan = true;
-    STATE.keluar.scannedSerial = serial;
-    showResult('keluar', 'warning', 'Memeriksa kartu...');
-    google.script.run
-      .withFailureHandler(err => {
-        REQUEST_BUSY.keluarScan = false;
-        handleGasFailure('keluar', err);
-      })
-      .withSuccessHandler(res => handleKeluarScan(res, serial))
-      .getBindingStatus(serial);
+    if (isLocal) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      
+      const pageId = 'page-' + tab;
+      const btnId = 'tab-btn-' + tab;
+      if (document.getElementById(pageId)) document.getElementById(pageId).classList.add('active');
+      if (document.getElementById(btnId)) document.getElementById(btnId).classList.add('active');
+      
+      if (typeof resetAllSerialInputs === 'function') resetAllSerialInputs();
+      
+      const contexts = ['masuk', 'keluar', 'security'];
+      contexts.forEach(ctx => {
+        const resultEl = document.getElementById(ctx + '-result');
+        if (resultEl) { resultEl.className = 'result-card'; resultEl.innerHTML = ''; }
+      });
 
-  } else if (context === 'security') {
-    const deptSelect = document.getElementById('security-dept');
-    const dept = deptSelect ? deptSelect.value : '';
-    if (!dept) {
-      showResult('security', 'error', 'Pilih departemen tujuan terlebih dahulu.');
-      return;
+      if (tab === 'dashboard' && typeof loadDashboard === 'function') loadDashboard();
+      if (tab === 'security' && typeof loadRecentLogs === 'function') loadRecentLogs();
+      if ((tab === 'cek-absen' || tab === 'cek-area') && typeof updatePeriodInput === 'function') updatePeriodInput();
+    } 
+    else if (targetUrl) {
+      window.top.location.href = targetUrl + token;
+    } 
+    else {
+      alert('URL Module belum dikonfigurasi di CONFIG_MODUL!');
     }
-    
-    const reasonRadio = document.querySelector('input[name="security_reason"]:checked');
-    const reason = reasonRadio ? reasonRadio.value : '';
-    
-    const modeRadio = document.querySelector('input[name="security_mode"]:checked');
-    const forceMode = modeRadio ? modeRadio.value : 'AUTO';
-    
-    if (REQUEST_BUSY.securityScan) return;
-    REQUEST_BUSY.securityScan = true;
-    STATE.security.scannedSerial = serial;
-    showResult('security', 'warning', 'Mencatat...');
-    google.script.run
-      .withFailureHandler(err => {
-        REQUEST_BUSY.securityScan = false;
-        handleGasFailure('security', err);
-      })
-      .withSuccessHandler(handleSecurityScan)
-      .scanAreaKerja(serial, dept, reason, forceMode);
-  }
+  }).getModuleUrls();
 }
 
 // ── MASUK: Check ready & confirm ───────────────────────────
-function isExternalUser(type, jabatan, dept) {
-  const marker = [type, jabatan, dept].join(' ').toUpperCase();
-  return ['MITRA', 'VISITOR', 'TAMU', 'EXTERNAL', 'EKSTERNAL', 'VENDOR', 'KONTRAKTOR', 'OUTSOURCE', 'OUTSOURCING']
-    .some(keyword => marker.includes(keyword));
-}
-
 function isInternalUser(type, jabatan, dept) {
   return !isExternalUser(type, jabatan, dept);
 }
@@ -480,7 +439,11 @@ function confirmMasuk() {
            <span class="meta">Kartu: ${escHtml(res.noKartuMK)} - ${escHtml(res.waktu)} - ${escHtml(res.shift)}</span>`);
         resetMasuk();
       } else {
-        showResult('masuk', 'error', escHtml(res.msg));
+        if (res.htmlMsg) {
+          showResult('masuk', 'error', res.htmlMsg);
+        } else {
+          showResult('masuk', 'error', escHtml(res.msg));
+        }
         document.getElementById('masuk-confirm').classList.add('visible');
       }
     })
@@ -519,7 +482,7 @@ function resetKeluarUi() {
 function handleKeluarScan(res, serial) {
   REQUEST_BUSY.keluarScan = false;
   if (!res.ok) {
-    showResult('keluar', 'error', escHtml(res.msg));
+    showResult('keluar', 'error', '❌ ' + escHtml(res.msg));
     const serialInput = document.getElementById('keluar-serial');
     if (serialInput) serialInput.value = '';
     STATE.keluar.scannedSerial = null;
@@ -528,7 +491,7 @@ function handleKeluarScan(res, serial) {
     return;
   }
   if (res.status !== 'BOUND') {
-    showResult('keluar', 'error', `Kartu <strong>${escHtml(serial)}</strong> tidak dalam status terikat / tidak dikenal.`);
+    showResult('keluar', 'error', `❌ Kartu <strong>${escHtml(serial)}</strong> tidak dalam status terikat / tidak dikenal.`);
     const serialInput = document.getElementById('keluar-serial');
     if (serialInput) serialInput.value = '';
     STATE.keluar.scannedSerial = null;
@@ -540,13 +503,13 @@ function handleKeluarScan(res, serial) {
   STATE.keluar.bindingData = res;
 
   showResult('keluar', 'warning',
-    `Kartu <strong>${escHtml(serial)}</strong> terikat ke <strong>${escHtml(res.nama)}</strong>.<br>
-     <span class="meta">NIK: ${escHtml(res.nik)} - ${escHtml(res.dept)} - Terikat sejak: ${escHtml(res.waktuBind)}</span><br><br>
+    `⚠️ Kartu <strong>${escHtml(serial)}</strong> terikat ke <strong>${escHtml(res.nama)}</strong>.<br>
+     <span class="meta">NIK: ${escHtml(res.nik)} · ${escHtml(res.dept)} · Terikat sejak: ${escHtml(res.waktuBind)}</span><br><br>
      Konfirmasi jika karyawan ini akan pulang.`);
 
   document.getElementById('keluar-avatar').textContent  = res.nama.charAt(0);
   document.getElementById('keluar-nama').textContent    = res.nama;
-  document.getElementById('keluar-detail').textContent  = res.nik + ' - ' + res.dept;
+  document.getElementById('keluar-detail').textContent  = res.nik + ' · ' + res.dept;
 
   document.getElementById('keluar-confirm').classList.add('visible');
 }
@@ -560,7 +523,7 @@ function confirmKeluar() {
   
   REQUEST_BUSY.keluarConfirm = true;
   setActionBusy('confirm-keluar', true);
-  showResult('keluar', 'warning', 'Memproses...');
+  showResult('keluar', 'warning', '⏳ Memproses...');
   document.getElementById('keluar-confirm').classList.remove('visible');
 
   google.script.run
@@ -575,13 +538,13 @@ function confirmKeluar() {
       setActionBusy('confirm-keluar', false);
       if (res.ok) {
         showResult('keluar', 'success',
-          `<strong>${escHtml(res.karyawan.nama)}</strong> telah keluar pabrik.<br>
-           <span class="meta">Kartu ${escHtml(res.noKartuMK)} telah dilepas - ${escHtml(res.waktu)}</span>`);
+          `🚪 <strong>${escHtml(res.karyawan.nama)}</strong> telah keluar pabrik.<br>
+           <span class="meta">Kartu ${escHtml(res.noKartuMK)} telah dilepas · ${escHtml(res.waktu)}</span>`);
         STATE.keluar = { scannedSerial:null, bindingData:null };
         document.getElementById('keluar-serial').value = '';
         resetKeluarUi();
       } else {
-        showResult('keluar', 'error', escHtml(res.msg));
+        showResult('keluar', 'error', '❌ ' + escHtml(res.msg));
         document.getElementById('keluar-confirm').classList.add('visible');
       }
     })
@@ -592,18 +555,18 @@ function confirmKeluar() {
 function handleSecurityScan(res) {
   REQUEST_BUSY.securityScan = false;
   if (!res.ok) {
-    showResult('security', 'error', escHtml(res.msg));
+    showResult('security', 'error', `❌ ${escHtml(res.msg)}`);
     const serialInput = document.getElementById('security-serial');
     if (serialInput) serialInput.value = '';
     STATE.security.scannedSerial = null;
   } else {
-    const statusLabel = res.inout === 'IN' ? 'MASUK' : 'KELUAR';
+    const icon  = res.inout === 'IN' ? '🟢' : '🟡';
     const color = res.inout === 'IN' ? 'success' : 'warning';
     showResult('security', color,
-      `<strong>${escHtml(res.karyawan.nama)}</strong><br>
-       <span class="meta">${escHtml(res.karyawan.nik)} - ${escHtml(res.karyawan.dept)} - ${escHtml(res.karyawan.jabatan)}</span><br>
-       <span class="meta">Kartu: ${escHtml(res.noKartuMK)} - ${escHtml(res.waktu)}</span><br>
-       <strong style="font-size:16px">${statusLabel} Area Kerja</strong>`);
+      `${icon} <strong>${escHtml(res.karyawan.nama)}</strong><br>
+       <span class="meta">${escHtml(res.karyawan.nik)} · ${escHtml(res.karyawan.dept)} · ${escHtml(res.karyawan.jabatan)}</span><br>
+       <span class="meta">Kartu: ${escHtml(res.noKartuMK)} · ${escHtml(res.waktu)}</span><br>
+       <strong style="font-size:16px">${res.inout === 'IN' ? '✅ MASUK Area Kerja' : '🚪 KELUAR Area Kerja'}</strong>`);
     document.getElementById('security-serial').value = '';
     STATE.security.scannedSerial = null;
     setTimeout(loadRecentLogs, 800);
@@ -644,7 +607,7 @@ function loadDashboard() {
           </div>
           <div class="log-info">
             <strong>${escHtml(k.nama)}</strong>
-            <span>${k.nik} - ${escHtml(k.dept)} - Kartu: ${k.noKartuMK}</span>
+            <span>${k.nik} · ${escHtml(k.dept)} · Kartu: ${k.noKartuMK}</span>
           </div>
           <div class="log-time">${k.waktuBind ? k.waktuBind.split(' ')[1] || '' : ''}</div>
         </div>`).join('');
@@ -672,11 +635,11 @@ function loadRecentLogs() {
       el.innerHTML = res.data.map(l => `
         <div class="log-item">
           <div class="log-dot ${l.inout === 'IN' ? 'in' : 'out'}">
-            ${l.inout === 'IN' ? 'IN' : 'OUT'}
+            ${l.inout === 'IN' ? '🟢' : '🟡'}
           </div>
           <div class="log-info">
             <strong>${escHtml(l.nama)}</strong>
-            <span>${l.noKartuMK} - ${l.nik}</span>
+            <span>${l.noKartuMK} · ${l.nik}</span>
           </div>
           <div class="log-time">${l.jam}<br><span style="font-size:10px">${l.tanggal}</span></div>
         </div>`).join('');
@@ -753,7 +716,7 @@ function renderAbsenReport(res) {
   }
   REPORT_CACHE.absen = res;
   if (exportBtn) exportBtn.disabled = !res.data.length;
-  showResult('cek-absen', 'success', `Periode ${escHtml(res.period)} - ${res.total} catatan`);
+  showResult('cek-absen', 'success', `Periode ${escHtml(res.period)} · ${res.total} catatan`);
   
   const role = STATE.currentUser ? STATE.currentUser.role : 'KARYAWAN';
   const isKaryawan = role === 'KARYAWAN' || role === 'Karyawan';
@@ -900,7 +863,7 @@ function renderAreaReport(res) {
     if(rekapList) rekapList.innerHTML = '';
     return;
   }
-  showResult('cek-area', 'success', `Periode ${escHtml(res.period)} - ${res.total} catatan`);
+  showResult('cek-area', 'success', `Periode ${escHtml(res.period)} · ${res.total} catatan`);
   
   // 1. RENDER LOG TIMESTAMP
   list.innerHTML = `
@@ -916,8 +879,8 @@ function renderAreaReport(res) {
         <div class="report-date">${escHtml(row.tanggal)}<br><span>${escHtml(row.jam)}</span></div>
         <div class="report-main">
           <strong>${row.inout === 'IN' ? 'MASUK Area Kerja' : 'KELUAR Area Kerja'}</strong>
-          <span>${escHtml(row.nama || row.nik)} - ${escHtml(row.nik)}</span>
-          <span>${escHtml(row.dept || '-')} - ${escHtml(row.jabatan || '-')}</span>
+          <span>${escHtml(row.nama || row.nik)} · ${escHtml(row.nik)}</span>
+          <span>${escHtml(row.dept || '-')} · ${escHtml(row.jabatan || '-')}</span>
           <div class="time-pair">
             <span class="time-pill ${row.inout === 'OUT' ? 'out' : ''}">${escHtml(row.inout)}</span>
             <span class="time-pill">Kartu ${escHtml(row.noKartuMK || '-')}</span>
@@ -980,7 +943,6 @@ function renderAreaReport(res) {
 
 function showResult(context, type, html) {
   const el = document.getElementById(context + '-result');
-  if (!el) return;
   el.className = 'result-card ' + type;
   el.innerHTML = html;
 }
@@ -1262,93 +1224,109 @@ function indicateScanSuccess() {
   showScanToast('Scan berhasil');
 }
 
-async function stopQRScanner() {
-  // Empty dummy function to satisfy await stopQRScanner() in switchTab.
-}
 
-// ── DIRECT FILE QR SCANNER ─────────────────────────────────
+// ── LIVE QR SCANNER (WebRTC) ───────────────────────────────
 
-async function processQRImage(event, context) {
-  const file = event.target.files && event.target.files[0];
-  if (!file) return;
-
-  const resultContainer = document.getElementById(context + '-result');
+window.openLiveScanner = function(context) {
+  if (typeof Html5Qrcode === 'undefined') {
+    showResult(context, 'error', 'Library Html5Qrcode belum termuat.');
+    return;
+  }
   
-  resetSerialInput(context);
-  if (resultContainer) {
-    resultContainer.className = 'result-card warning';
-    resultContainer.innerHTML = '<strong>Sedang menganalisis foto...</strong>';
-    resultContainer.style.display = 'block';
+  const overlay = document.getElementById('qr-overlay');
+  const fbBtn = document.getElementById('qr-fallback-btn');
+  if (fbBtn) fbBtn.style.display = 'none';
+  const reader = document.getElementById('qr-reader');
+  if (!overlay || !reader) return;
+  
+  // Set current context
+  QR.context = context;
+  
+  // Reset overlay
+  document.getElementById('qr-result-text').textContent = 'Mencari barcode/QR...';
+  setQRDiagnostic('');
+  
+  overlay.classList.add('active');
+  
+  const formats = getScannerFormats();
+  if (!QR.html5QrCode) {
+    QR.html5QrCode = new Html5Qrcode('qr-reader', formats ? { formatsToSupport: formats } : undefined);
   }
+  
+  QR.isScanning = true;
+  
+  const config = {
+    fps: 10,
+    qrbox: { width: 250, height: 150 },
+    aspectRatio: 1.0,
+    disableFlip: false
+  };
+  
+  QR.html5QrCode.start(
+    { facingMode: "environment" }, 
+    config,
+    (decodedText, decodedResult) => {
+      // onSuccess
+      const serial = normalizeSerial(decodedText);
+      if (serial && isValidSerial(serial)) {
+        indicateScanSuccess();
+        document.getElementById('qr-result-text').textContent = 'Ditemukan: ' + serial;
+        stopQRScanner().then(() => {
+          onSerialScanned(QR.context, serial);
+        });
+      }
+    },
+    (errorMessage) => {
+      // onProgress (ignore mostly)
+    }
+  ).catch(err => {
+    let msg = typeof err === 'string' ? err : (err.message || 'Izin ditolak atau tidak didukung');
+    setQRDiagnostic('Kamera gagal: ' + msg);
+    const fbBtn = document.getElementById('qr-fallback-btn');
+    if (fbBtn) fbBtn.style.display = 'block';
+    QR.isScanning = false;
+  });
+};
 
-  let decodedText = null;
+window.stopQRScanner = async function() {
+  if (QR.html5QrCode && QR.isScanning) {
+    try {
+      await QR.html5QrCode.stop();
+      // QR.html5QrCode.clear();
+    } catch (e) {
+      console.warn("Failed to stop QR scanner", e);
+    }
+  }
+  QR.isScanning = false;
+  const overlay = document.getElementById('qr-overlay');
+  const fbBtn = document.getElementById('qr-fallback-btn');
+  if (fbBtn) fbBtn.style.display = 'none';
+  if (overlay) overlay.classList.remove('active');
+};
 
+
+window.handleFallbackImage = async function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById('qr-result-text').textContent = 'Memproses gambar...';
+  setQRDiagnostic('');
   try {
-    // 1) Coba Native BarcodeDetector (sangat cepat & akurat di iOS 17+ dan Android Chrome)
-    if (typeof BarcodeDetector !== 'undefined') {
-      try {
-        const detector = new BarcodeDetector();
-        const img = new Image();
-        const url = URL.createObjectURL(file);
-        await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
-        const barcodes = await detector.detect(img);
-        URL.revokeObjectURL(url);
-        if (barcodes && barcodes.length > 0) {
-          decodedText = barcodes[0].rawValue;
-        }
-      } catch(e) {
-        console.warn('Native BarcodeDetector failed', e);
-      }
-    }
-
-    // 2) Fallback ke html5-qrcode
-    if (!decodedText) {
-      if (typeof Html5Qrcode === 'undefined') throw new Error('Library html5-qrcode belum termuat.');
-      
-      let dummyReader = document.getElementById('dummy-qr-reader');
-      if (!dummyReader) {
-        dummyReader = document.createElement('div');
-        dummyReader.id = 'dummy-qr-reader';
-        dummyReader.style.display = 'none';
-        document.body.appendChild(dummyReader);
-      }
-
-      if (!QR.html5QrCode) {
-        const formats = getScannerFormats();
-        QR.html5QrCode = new Html5Qrcode('dummy-qr-reader', formats ? { formatsToSupport: formats } : undefined);
-      }
-      
-      decodedText = await QR.html5QrCode.scanFile(file, true);
-    }
-    
-    event.target.value = ''; 
-    
+    const decodedText = await QR.html5QrCode.scanFile(file, true);
     const serial = normalizeSerial(decodedText);
-    if (!serial || !isValidSerial(serial)) {
-      if (resultContainer) {
-        resultContainer.className = 'result-card error';
-        resultContainer.innerHTML = '<strong>Kode terbaca:</strong> ' + decodedText + '<br>Tetapi format bukan kartu MK / NIK.';
-      }
-      return;
+    if (serial && isValidSerial(serial)) {
+      indicateScanSuccess();
+      document.getElementById('qr-result-text').textContent = 'Ditemukan: ' + serial;
+      stopQRScanner().then(() => {
+        onSerialScanned(QR.context, serial);
+      });
+    } else {
+      setQRDiagnostic('Bukan format kartu MK/NIK yang valid.');
     }
-    
-    indicateScanSuccess();
-    document.getElementById(context + '-serial').value = serial;
-    if (resultContainer) {
-      resultContainer.className = 'result-card';
-      resultContainer.innerHTML = 'Ditemukan: ' + serial;
-    }
-    
-    onSerialScanned(context, serial);
-
-  } catch(err) {
-    event.target.value = '';
-    if (resultContainer) {
-      resultContainer.className = 'result-card error';
-      resultContainer.innerHTML = '<strong>Gagal:</strong> Barcode tidak terbaca dari foto (hindari silau/blur).<br><span style="color:#d9534f;font-weight:600;">Silakan ketik NIK / MK secara manual di kotak bawah lalu klik SCAN.</span>';
-    }
+  } catch (err) {
+    setQRDiagnostic('Barcode tidak terdeteksi pada gambar.');
   }
-}
+  e.target.value = ''; // reset
+};
 
 // ── Init ───────────────────────────────────────────────────
 function bindUiEvents() {
@@ -1441,28 +1419,36 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el) { el.className = 'result-card'; el.innerHTML = ''; }
   });
   // Reset masuk state
-  STATE.masuk = {
-    selectedNIK: null,
-    selectedNama: null,
-    selectedType: null,
-    selectedDept: null,
-    selectedJabatan: null,
-    scannedSerial: null,
-    completed: false
-  };
+  STATE.masuk = { selectedNIK:null, selectedNama:null, selectedDept:null, selectedJabatan:null, scannedSerial:null };
   STATE.keluar = { scannedSerial:null, bindingData:null };
   STATE.security = { scannedSerial:null };
-  STATE.authBootPending = false;
   loadRecentLogs();
 
-  const sessionNik = getIncomingSessionNik();
-  if (sessionNik) {
-    beginModuleAutoLogin(sessionNik);
-    return;
-  }
+  const savedSession = localStorage.getItem('dam_session');
+  if (savedSession) {
+    try {
+      const user = JSON.parse(savedSession);
+      STATE.currentUser = user;
+      STATE.masuk.selectedNIK = user.nik;
+      STATE.masuk.selectedNama = user.nama;
+      STATE.masuk.selectedDept = user.dept;
+      STATE.masuk.selectedJabatan = user.jabatan;
+      
+      const inNik = document.getElementById('masuk-nik');
+      const inNama = document.getElementById('masuk-nama-input');
+      const inDept = document.getElementById('masuk-dept');
+      const inJabatan = document.getElementById('masuk-jabatan');
+      if (inNik) inNik.value = user.nik;
+      if (inNama) inNama.value = user.nama;
+      if (inDept) inDept.value = user.dept || '';
+      if (inJabatan) inJabatan.value = user.jabatan || '';
 
-  setLoginUiMode('login');
-  restoreSavedSession();
+      applyRolePermissions(user.role);
+      updateMasukScannerVisibility();
+    } catch (e) {
+      localStorage.removeItem('dam_session');
+    }
+  }
 });
 
 window.addEventListener('pageshow', () => {
@@ -1487,7 +1473,8 @@ function handleLogout() {
   document.getElementById('app-tabbar').style.display = 'none';
   
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  setLoginUiMode('login');
+  document.getElementById('page-login').style.display = 'flex';
+  document.getElementById('page-login').classList.add('active');
   
   const loginNik = document.getElementById('login-nik');
   const loginPwd = document.getElementById('login-password');

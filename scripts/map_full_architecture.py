@@ -29,7 +29,7 @@ def extract_functions(state: AgentState):
     
     # 1. Extract Backend (Code.js / Code.gs)
     for ext in ["*.gs", "*.js"]:
-        for path in ROOT.glob(ext):
+        for path in (ROOT / "active").rglob(ext):
             if path.name.lower() in ["code.js", "code.gs"]:
                 text = path.read_text(encoding="utf-8", errors="replace")
                 
@@ -60,7 +60,7 @@ def extract_functions(state: AgentState):
                         }
                         
     # 2. Extract Frontend (*.html)
-    for path in ROOT.glob("*.html"):
+    for path in (ROOT / "active").rglob("*.html"):
         text = path.read_text(encoding="utf-8", errors="replace")
         
         # Match standard functions: function foo(a, b) {

@@ -7,6 +7,7 @@ venv/
 reports/
 CONTEXT_SUMMARY.md
 _local/
+deployment_urls.json
 
 # Local editor and OS files
 .clinerules

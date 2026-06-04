@@ -10,7 +10,7 @@ import urllib.request
 
 
 SPREADSHEET_ID = "1jTsZixaANJd8Ijs3f66LwbXSBC9UcRoALLolEvxiz40"
-RANGE_NAME = "CONFIG_MODUL!A1:B4"
+RANGE_NAME = "CONFIG_MODUL!A1:B5"
 
 
 def load_access_token():
@@ -33,7 +33,7 @@ def request_json(method, url, token, payload=None):
         return json.loads(response.read().decode("utf-8"))
 
 
-def build_payload(gate_url, area_url, report_url):
+def build_payload(gate_url, area_url, report_url, home_url):
     return {
         "range": RANGE_NAME,
         "majorDimension": "ROWS",
@@ -42,6 +42,7 @@ def build_payload(gate_url, area_url, report_url):
             ["GATE_PABRIK", gate_url],
             ["AREA_KERJA", area_url],
             ["REPORT", report_url],
+            ["HOME_PORTAL", home_url],
         ],
     }
 
@@ -54,30 +55,31 @@ def verify_sheet(token):
     return request_json("GET", verify_url, token)
 
 
-def update_sheet(gate_url, area_url, report_url):
+def update_sheet(gate_url, area_url, report_url, home_url):
     token = load_access_token()
     update_url = (
         f"https://sheets.googleapis.com/v4/spreadsheets/"
         f"{SPREADSHEET_ID}/values/{RANGE_NAME}?valueInputOption=USER_ENTERED"
     )
-    payload = build_payload(gate_url, area_url, report_url)
+    payload = build_payload(gate_url, area_url, report_url, home_url)
     update_result = request_json("PUT", update_url, token, payload)
     verify_result = verify_sheet(token)
     return update_result, verify_result
 
 
-def build_temp_injector_code(gate_url, area_url, report_url):
+def build_temp_injector_code(gate_url, area_url, report_url, home_url):
     return f"""function doGet() {{
   try {{
     const ss = SpreadsheetApp.openById('{SPREADSHEET_ID}');
     let sheet = ss.getSheetByName('CONFIG_MODUL');
     if (!sheet) sheet = ss.insertSheet('CONFIG_MODUL');
     sheet.clearContents();
-    sheet.getRange(1, 1, 4, 2).setValues([
+    sheet.getRange(1, 1, 5, 2).setValues([
       ['NAMA_MODUL', 'LINK_MODUL'],
       ['GATE_PABRIK', {json.dumps(gate_url)}],
       ['AREA_KERJA', {json.dumps(area_url)}],
-      ['REPORT', {json.dumps(report_url)}]
+      ['REPORT', {json.dumps(report_url)}],
+      ['HOME_PORTAL', {json.dumps(home_url)}]
     ]);
     return ContentService.createTextOutput('OK_CONFIG_MODUL_UPDATED');
   }} catch (err) {{
@@ -87,15 +89,15 @@ def build_temp_injector_code(gate_url, area_url, report_url):
 """
 
 
-def fallback_update_via_temp_deploy(gate_url, area_url, report_url):
+def fallback_update_via_temp_deploy(gate_url, area_url, report_url, home_url):
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    home_dir = os.path.join(project_root, "HOME_PORTAL")
+    home_dir = os.path.join(project_root, "active", "HOME_PORTAL")
     code_path = os.path.join(home_dir, "Code.js")
 
     with open(code_path, "r", encoding="utf-8") as handle:
         original_code = handle.read()
 
-    temp_code = build_temp_injector_code(gate_url, area_url, report_url)
+    temp_code = build_temp_injector_code(gate_url, area_url, report_url, home_url)
 
     try:
         with open(code_path, "w", encoding="utf-8") as handle:
@@ -154,6 +156,7 @@ def main():
     parser.add_argument("--gate-url", required=True, help="Exec URL for GATE_PABRIK module")
     parser.add_argument("--area-url", required=True, help="Exec URL for AREA_KERJA module")
     parser.add_argument("--report-url", required=True, help="Exec URL for REPORT module")
+    parser.add_argument("--home-url", required=True, help="Exec URL for HOME_PORTAL module")
     args = parser.parse_args()
 
     try:
@@ -161,6 +164,7 @@ def main():
             args.gate_url,
             args.area_url,
             args.report_url,
+            args.home_url,
         )
     except urllib.error.HTTPError as err:
         error_body = err.read().decode("utf-8")
@@ -171,6 +175,7 @@ def main():
                     args.gate_url,
                     args.area_url,
                     args.report_url,
+                    args.home_url,
                 )
             except Exception as fallback_err:
                 print(f"Fallback failed: {fallback_err}")

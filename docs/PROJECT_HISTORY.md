@@ -186,8 +186,26 @@ Dokumentasi dan sebagian asumsi repo masih menganggap file root sebagai source u
 - `CONFIG_MODUL` tetap menjadi pusat registry URL deploy aktif.
 - Tool audit Python dipakai sebagai baseline pengecekan dependency sebelum deploy.
 
+## FASE 16: Pengurangan Noise Repo dan Jalur Baca Kanonik
+
+**Tanggal**
+2026-06-04
+
+**Kondisi awal**
+Repo masih memuat terlalu banyak artifact audit lama, wrapper tooling yang duplikatif, dan helper eksperimen yang tidak lagi dipakai operasional.
+
+**Risiko**
+- Agent atau developer baru mudah membaca dokumen atau report yang salah.
+- Audit lama bisa terlihat seperti sumber kebenaran walau sudah tidak relevan.
+- Tooling pendukung terasa lebih banyak dari yang benar-benar dibutuhkan.
+
+**Solusi**
+- Menyisakan hanya script audit dan deploy yang benar-benar operasional.
+- Menghapus wrapper dan eksperimen yang tidak lagi dipakai.
+- Menegaskan `reports/` sebagai generated artifact, bukan dokumentasi arsitektur.
+- Menambahkan urutan baca kanonik di `README` dan dokumen arsitektur.
+
 ## Langkah Lanjutan yang Masih Layak
 
 1. QA manual penuh untuk semua role live.
-2. Rapikan file legacy di root setelah migrasi `active/` benar-benar final.
-3. Pertahankan disiplin update dokumentasi setiap kali ada perubahan deploy atau arsitektur.
+2. Pertahankan disiplin update dokumentasi setiap kali ada perubahan deploy atau arsitektur.

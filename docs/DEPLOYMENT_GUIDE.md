@@ -77,7 +77,7 @@ Tujuannya:
 
 Pastikan:
 
-1. `deployment_urls.json` berisi URL terbaru jika dipakai oleh tooling lokal.
+1. `deployment_urls.json` hanya dianggap artifact lokal jika memang masih dipakai tooling pribadi.
 2. `CONFIG_MODUL` di spreadsheet memuat:
    - `GATE_PABRIK`
    - `AREA_KERJA`
@@ -94,6 +94,7 @@ Pastikan:
 ## Aturan Operasional
 
 - Jangan deploy dari file root lama jika ada duplikasi dengan `active/`.
+- Jangan jadikan file di `reports/` sebagai dasar keputusan deploy; generate ulang jika perlu.
 - Jangan jalankan auto-deploy untuk `HOME_PORTAL` kecuali benar-benar bermaksud update in-place.
 - Setelah perubahan code runtime, audit dan deploy harus berjalan berurutan.
 - Jika ada perubahan struktur sheet, perbarui dokumentasi dan validasi header runtime sebelum release.

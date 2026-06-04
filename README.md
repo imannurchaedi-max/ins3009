@@ -30,6 +30,23 @@ Folder root masih dapat berisi artefak transisi, tooling, atau file lama. Untuk 
 - `_local/`
   Catatan atau helper lokal yang tidak ikut version control.
 
+## Urutan Baca yang Disarankan
+
+Jika ingin cepat paham repo ini, baca urutannya seperti ini:
+
+1. `README.md`
+2. `docs/GAS_ARCHITECTURE.md`
+3. `docs/DEPLOYMENT_GUIDE.md`
+4. `active/`
+
+Yang tidak perlu dijadikan sumber kebenaran arsitektur:
+
+- `reports/`
+  Hanya artifact audit yang boleh dihapus dan di-generate ulang.
+- `_local/`
+  Catatan kerja lokal.
+- folder environment seperti `node_modules/` dan `venv/`
+
 ## Dokumen Penting
 
 - [docs/GAS_ARCHITECTURE.md](docs/GAS_ARCHITECTURE.md)
@@ -52,4 +69,4 @@ Folder root masih dapat berisi artefak transisi, tooling, atau file lama. Untuk 
 
 ## Catatan Lokal
 
-File sementara, helper patch lama, hasil audit, dan catatan kerja lokal disimpan di area yang di-ignore git agar root project tetap bersih.
+File sementara, hasil audit, dan catatan kerja lokal disimpan di area yang di-ignore git agar root project tetap bersih. Jika suatu saat report atau cache terasa menyesatkan, hapus dan generate ulang dari script audit resmi.

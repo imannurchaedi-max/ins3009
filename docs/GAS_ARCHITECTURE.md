@@ -4,6 +4,21 @@
 
 Project ini adalah web app Google Apps Script untuk access control, absensi, dan tracking area kerja. Runtime aktifnya sekarang menggunakan struktur `active/` sebagai source of truth, dengan Google Sheets sebagai storage operasional.
 
+## Jalur Baca Efektif
+
+Untuk memahami sistem tanpa tersesat oleh artifact lama, gunakan urutan ini:
+
+1. `README.md`
+2. dokumen ini
+3. `docs/DEPLOYMENT_GUIDE.md`
+4. source di `active/`
+
+Yang tidak boleh dipakai sebagai sumber arsitektur:
+
+- `reports/` karena seluruh isinya generated artifact
+- cache Python atau helper lokal di `_local/`
+- asumsi lama bahwa file root di luar `active/` adalah runtime aktif
+
 ## Source of Truth
 
 - Semua edit runtime yang akan diaudit, di-push, dan di-deploy harus mengacu ke `active/`.
@@ -36,7 +51,7 @@ Project ini adalah web app Google Apps Script untuk access control, absensi, dan
 - `active/MODUL_AREA_KERJA/*`
   Flow `SCAN AREA` dan log pergerakan area kerja.
 - `active/MODUL_REPORT/*`
-  Report terpisah untuk kebutuhan monitoring dan ekspor.
+  Backend report khusus untuk monitoring dan ekspor. Frontend-nya masih memakai shared shell yang sama dengan modul lain, jadi baca `Code.js` dan `SharedLib.gs` lebih dulu jika ingin memahami batas tanggung jawab modul ini.
 
 ## Workflow Aplikasi
 
@@ -79,6 +94,19 @@ Project ini adalah web app Google Apps Script untuk access control, absensi, dan
   Push dan deploy modul dari folder `active/`.
 - `scripts/update_config_sheet.py`
   Update `CONFIG_MODUL` ke URL aktif terbaru.
+
+## Tooling yang Perlu Dipertahankan
+
+Tooling Python yang dianggap resmi dan perlu dibaca hanya:
+
+- `scripts/audit_project.py`
+- `scripts/extract_functions.py`
+- `scripts/compare_gas_runtime.py`
+- `scripts/deploy_all.py`
+- `scripts/deploy_home_fixed.py`
+- `scripts/update_config_sheet.py`
+
+Selain itu jangan diasumsikan sebagai jalur operasional utama kecuali nanti ditambahkan lagi secara eksplisit.
 
 ## Catatan Runtime Penting
 

@@ -115,7 +115,7 @@ def main() -> None:
         "",
         "## Generated Artifacts",
         "",
-        "- `reports/project_scan.json` from `scripts/scan_project.py`",
+        "- `reports/project_scan.json` from `scripts/audit_project.py`",
         "- `reports/function_inventory.md` from `scripts/extract_functions.py`",
         "- `reports/gas_runtime_comparison.json` from `scripts/compare_gas_runtime.py`",
     ]

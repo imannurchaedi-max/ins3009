@@ -67,6 +67,7 @@ Kondisi terbaru:
 Keputusan hardening:
 - audit, edit, deploy, dan dokumentasi harus mengacu ke `active/`
 - file root lama diperlakukan sebagai legacy atau transisi sampai benar-benar dipensiunkan
+- generated report di `reports/` tidak boleh dijadikan sumber arsitektur tanpa generate ulang
 
 ## Checklist Pasca Perubahan Runtime
 

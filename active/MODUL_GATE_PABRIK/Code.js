@@ -186,7 +186,7 @@ function bindKartu(noKartuMK, nik, loker) {
         return {
           ok: false,
           msg: `Kartu ${no} sudah terikat dengan ${existing.nama}. Lepaskan dulu sebelum mengikat ulang.`,
-          htmlMsg: `❌ Kartu <strong>${no}</strong> masih terikat!<br>
+          htmlMsg: `❌ Kartu <strong>${escHtml(no)}</strong> masih terikat!<br>
                     <div style="margin-top:8px; padding:8px; background:rgba(255,255,255,0.7); border-radius:4px; color:#333; font-size:13px; text-align:left; border-left:3px solid #dc3545;">
                       <strong>${escHtml(existing.nama)}</strong> (${escHtml(existing.nik)})<br>
                       ${escHtml(existing.dept || '-')} · ${escHtml(existing.jabatan || '-')}<br>
@@ -206,7 +206,7 @@ function bindKartu(noKartuMK, nik, loker) {
           return { 
             ok: false, 
             msg: `NIK ${nik} (${kar.nama}) sudah terikat di kartu ${oldKartu}. Selesaikan dulu.`,
-            htmlMsg: `❌ NIK <strong>${escHtml(nik)}</strong> (${escHtml(kar.nama)}) masih terikat di kartu <strong>${oldKartu}</strong>.<br>
+            htmlMsg: `❌ NIK <strong>${escHtml(nik)}</strong> (${escHtml(kar.nama)}) masih terikat di kartu <strong>${escHtml(oldKartu)}</strong>.<br>
                       <div style="margin-top:8px; padding:8px; background:rgba(255,255,255,0.7); border-radius:4px; color:#333; font-size:13px; text-align:left; border-left:3px solid #dc3545; margin-bottom:8px">
                         Karyawan ini belum melakukan proses KELUAR untuk mengembalikan kartu lamanya.
                       </div>

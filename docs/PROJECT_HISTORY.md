@@ -275,6 +275,40 @@ User bisa salah scan kartu, sementara flow gate belum memberi jalur koreksi yang
 - Menambahkan tombol `SCAN ULANG KARTU` untuk `MASUK` dan `KELUAR`.
 - Menjaga state scan tetap bisa dibersihkan tanpa reload halaman.
 
+## FASE 21: Hotfix Helper HTML Escape di Backend Gate
+
+**Tanggal**
+2026-06-05
+
+**Kondisi awal**
+Saat flow kartu bentrok atau force release dipicu, gate bisa memunculkan error `escHtml is not defined`.
+
+**Akar masalah**
+- Backend `MODUL_GATE_PABRIK` membentuk `htmlMsg` dengan helper `escHtml()`.
+- Helper itu hanya tersedia di frontend, bukan di runtime GAS backend modul gate.
+
+**Solusi**
+- Menambahkan helper `escHtml()` langsung ke backend `MODUL_GATE_PABRIK`.
+- Redeploy gate dan sinkronkan ulang `CONFIG_MODUL`.
+
+## FASE 22: Blast Helper Escape Backend
+
+**Tanggal**
+2026-06-05
+
+**Kondisi awal**
+Error `escHtml is not defined` muncul di gate, dan pola yang sama berpotensi muncul lagi kalau backend modul lain membangun `htmlMsg` tanpa util escape bersama.
+
+**Akar masalah**
+- Helper `escHtml()` sebelumnya hidup di frontend dan sempat ditambal lokal di backend gate.
+- Runtime aktif belum punya util escape HTML yang konsisten di `SharedLib.gs`.
+- Beberapa `htmlMsg` backend masih menyisipkan nilai mentah seperti nomor kartu.
+
+**Solusi**
+- Menambahkan `escHtml()` ke seluruh `SharedLib.gs` pada runtime aktif dan submodule aktif.
+- Menghapus helper duplikat dari backend gate agar kembali mengandalkan util bersama.
+- Menyelaraskan pesan `htmlMsg` backend yang masih memakai nilai mentah menjadi tersanitasi.
+
 ## Langkah Lanjutan yang Masih Layak
 
 1. QA manual penuh untuk semua role live.

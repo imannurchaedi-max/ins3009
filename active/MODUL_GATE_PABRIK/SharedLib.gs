@@ -41,6 +41,15 @@ function asText(value) {
   }
 }
 
+function escHtml(value) {
+  return asText(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function normalizeHeader(value) {
   try {
     return asText(value).trim().toUpperCase().replace(/[\s_]+/g, '');

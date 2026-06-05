@@ -1,0 +1,29 @@
+{
+  "modules": [
+    {
+      "name": "HOME_PORTAL",
+      "dir": "active/HOME_PORTAL",
+      "deploymentId": "AKfycbzoALF7oD-WRuyhwp22pdQ6l3fGLRJuQ-OSnb5AizG-MBcOul5m74z6Xtq-hQ5IEsqX",
+      "frozen": true,
+      "_note": "Shell utama — URL TIDAK PERNAH diganti. frozen:true = push only, no redeploy."
+    },
+    {
+      "name": "MODUL_GATE_PABRIK",
+      "dir": "active/MODUL_GATE_PABRIK",
+      "deploymentId": "AKfycbznsJVQeaS5JS1P5xD3xH02REQTdwjshG7xB4n7gRC7dyDFt3ddfXcPSbnk8BEhleGiPg",
+      "frozen": false
+    },
+    {
+      "name": "MODUL_AREA_KERJA",
+      "dir": "active/MODUL_AREA_KERJA",
+      "deploymentId": "AKfycbzZNNjmbYqx8fa1KFAXLU4ZNeWTkal45si3AI0DYJxDMhaKT6t-XdMDE5Ry4pIg36phMw",
+      "frozen": false
+    },
+    {
+      "name": "MODUL_REPORT",
+      "dir": "active/MODUL_REPORT",
+      "deploymentId": "AKfycbyak8S_-v0WZIdF_DecxChJTQSGVmLhh6NPGZr41SaqiuYrZsDQVlvkghCjMA4Kj8JD",
+      "frozen": false
+    }
+  ]
+}

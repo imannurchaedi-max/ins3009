@@ -569,6 +569,49 @@ function include(filename) {
 
 // ---- ROUTING / CONFIG ----
 
+/**
+ * setupModuleUrls()
+ * Jalankan SEKALI dari GAS Editor untuk mengisi / memperbarui CONFIG_MODUL
+ * dengan URL deployment yang benar.
+ *
+ * HOME_PORTAL bersifat frozen — URL-nya tidak pernah berubah.
+ * Modul lain (GATE_PABRIK, AREA_KERJA, REPORT) bisa diperbarui
+ * jika deployment ID berubah, tapi URL tetap selama deployment ID sama.
+ */
+function setupModuleUrls() {
+  const URLS = {
+    HOME_PORTAL:      'https://script.google.com/macros/s/AKfycbzoALF7oD-WRuyhwp22pdQ6l3fGLRJuQ-OSnb5AizG-MBcOul5m74z6Xtq-hQ5IEsqX/exec',
+    GATE_PABRIK:      'https://script.google.com/macros/s/AKfycbznsJVQeaS5JS1P5xD3xH02REQTdwjshG7xB4n7gRC7dyDFt3ddfXcPSbnk8BEhleGiPg/exec',
+    AREA_KERJA:       'https://script.google.com/macros/s/AKfycbzZNNjmbYqx8fa1KFAXLU4ZNeWTkal45si3AI0DYJxDMhaKT6t-XdMDE5Ry4pIg36phMw/exec',
+    REPORT:           'https://script.google.com/macros/s/AKfycbyak8S_-v0WZIdF_DecxChJTQSGVmLhh6NPGZr41SaqiuYrZsDQVlvkghCjMA4Kj8JD/exec',
+  };
+
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName('CONFIG_MODUL');
+  if (!sheet) {
+    sheet = ss.insertSheet('CONFIG_MODUL');
+    sheet.appendRow(['NAMA_MODUL', 'LINK_MODUL']);
+    sheet.getRange('A1:B1').setFontWeight('bold');
+  }
+
+  const data = sheet.getDataRange().getValues();
+  const rowMap = {};
+  for (let i = 1; i < data.length; i++) {
+    rowMap[asText(data[i][0]).toUpperCase()] = i + 1;
+  }
+
+  for (const [key, url] of Object.entries(URLS)) {
+    if (rowMap[key]) {
+      sheet.getRange(rowMap[key], 2).setValue(url);
+    } else {
+      sheet.appendRow([key, url]);
+    }
+  }
+
+  Logger.log('CONFIG_MODUL updated:\n' + Object.entries(URLS).map(([k, v]) => `  ${k}: ${v}`).join('\n'));
+  SpreadsheetApp.getUi && SpreadsheetApp.getUi().alert('CONFIG_MODUL berhasil diperbarui!');
+}
+
 function getModuleUrls() {
   try {
     const ss = getSpreadsheet();

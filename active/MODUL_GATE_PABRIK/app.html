@@ -42,8 +42,66 @@ const STATE = {
   currentUser: null,
   masuk:    { selectedNIK: null, selectedNama: null, selectedType: null, selectedDept: null, selectedJabatan: null, scannedSerial: null, completed: false },
   keluar:   { scannedSerial: null, bindingData: null },
-  security: { scannedSerial: null }
+  security: { scannedSerial: null, selectedArea: '', shiftLabel: '', storageKey: '' }
 };
+
+function detectClientShiftLabel() {
+  const hour = new Date().getHours();
+  if (hour >= 6 && hour < 14) return 'Shift 1';
+  if (hour >= 14 && hour < 22) return 'Shift 2';
+  return 'Shift 3';
+}
+
+function buildSecurityAreaStorageKey() {
+  const nik = STATE.currentUser && STATE.currentUser.nik ? STATE.currentUser.nik : 'guest';
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm   = String(now.getMonth() + 1).padStart(2, '0');
+  const dd   = String(now.getDate()).padStart(2, '0');
+  return `dam_security_area_${nik}_${yyyy}${mm}${dd}_${detectClientShiftLabel().replace(/\s+/g, '_')}`;
+}
+
+function applySecurityAreaUiState() {
+  const select      = document.getElementById('security-area-select');
+  const hint        = document.getElementById('security-area-hint');
+  const scanButton  = document.querySelector('[onclick="openLiveScanner(\'security\')"]');
+  const serialInput = document.getElementById('security-serial');
+  const serialSubmit = document.querySelector('[data-context="security"][data-action="submit-serial"]');
+  const selectedArea = STATE.security.selectedArea;
+  const shiftLabel   = STATE.security.shiftLabel || detectClientShiftLabel();
+  const ready = Boolean(selectedArea);
+
+  if (select) select.value = selectedArea || '';
+  if (hint) {
+    hint.textContent = selectedArea
+      ? `Area shift aktif: ${selectedArea} (${shiftLabel}). Semua scan akan masuk ke area ini.`
+      : `Pilih area sekali di awal ${shiftLabel}. Semua scan berikutnya akan otomatis tercatat ke area itu.`;
+  }
+  if (scanButton)   scanButton.disabled   = !ready;
+  if (serialInput)  serialInput.disabled  = !ready;
+  if (serialSubmit) serialSubmit.disabled = !ready;
+}
+
+function syncSecurityAreaShift() {
+  STATE.security.shiftLabel  = detectClientShiftLabel();
+  STATE.security.storageKey  = buildSecurityAreaStorageKey();
+  let savedArea = '';
+  try { savedArea = localStorage.getItem(STATE.security.storageKey) || ''; } catch (_) {}
+  STATE.security.selectedArea = savedArea;
+  applySecurityAreaUiState();
+}
+
+function saveSecurityAreaShift() {
+  const select = document.getElementById('security-area-select');
+  const area = select ? String(select.value || '').trim() : '';
+  if (!area) { showResult('security', 'error', 'Pilih area pengawasan terlebih dahulu.'); return; }
+  STATE.security.shiftLabel  = detectClientShiftLabel();
+  STATE.security.storageKey  = buildSecurityAreaStorageKey();
+  STATE.security.selectedArea = area;
+  try { localStorage.setItem(STATE.security.storageKey, area); } catch (_) {}
+  applySecurityAreaUiState();
+  showResult('security', 'success', `Area shift disimpan: <strong>${escHtml(area)}</strong> (${escHtml(STATE.security.shiftLabel)}).`);
+}
 
 const REQUEST_BUSY = {
   masukConfirm: false,
@@ -355,6 +413,7 @@ async function switchTab(tab) {
 
       if (tab === 'dashboard' && typeof loadDashboard === 'function') loadDashboard();
       if (tab === 'security' && typeof loadRecentLogs === 'function') loadRecentLogs();
+      if (tab === 'security') syncSecurityAreaShift();
       if ((tab === 'cek-absen' || tab === 'cek-area') && typeof updatePeriodInput === 'function') updatePeriodInput();
     } 
     else if (targetUrl) {
@@ -488,14 +547,15 @@ function onSerialScanned(context, serial) {
       .getBindingStatus(serial);
 
   } else if (context === 'security') {
-    const dept = '';
-    
+    const area = (STATE.security.selectedArea || '').trim();
+    if (!area) { showResult('security', 'error', 'Pilih area pengawasan terlebih dahulu, lalu klik SET AREA.'); return; }
+
     const reasonRadio = document.querySelector('input[name="security_reason"]:checked');
     const reason = reasonRadio ? reasonRadio.value : '';
-    
+
     const modeRadio = document.querySelector('input[name="security_mode"]:checked');
     const forceMode = modeRadio ? modeRadio.value : 'AUTO';
-    
+
     if (REQUEST_BUSY.securityScan) return;
     REQUEST_BUSY.securityScan = true;
     STATE.security.scannedSerial = serial;
@@ -506,7 +566,7 @@ function onSerialScanned(context, serial) {
         handleGasFailure('security', err);
       })
       .withSuccessHandler(handleSecurityScan)
-      .scanAreaKerja(serial, dept, reason, forceMode);
+      .scanAreaKerja(serial, area, reason, forceMode);
   }
 }
 
@@ -2015,6 +2075,7 @@ function bindUiEvents() {
     if (action === 'close-qr') stopQRScanner();
     if (action === 'reset-serial') resetSerialInput(context);
 
+    if (action === 'set-security-area') saveSecurityAreaShift();
     if (action === 'submit-serial') submitSerial(context);
     if (action === 'confirm-masuk') confirmMasuk();
     if (action === 'confirm-keluar') confirmKeluar();
@@ -2083,7 +2144,7 @@ document.addEventListener('DOMContentLoaded', () => {
     completed: false
   };
   STATE.keluar = { scannedSerial:null, bindingData:null };
-  STATE.security = { scannedSerial:null };
+  STATE.security = { scannedSerial:null, selectedArea:'', shiftLabel:'', storageKey:'' };
   STATE.authBootPending = false;
   loadRecentLogs();
 

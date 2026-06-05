@@ -1,4 +1,8 @@
 {
+  "scripts": {
+    "push": "node scripts/push-all.js",
+    "push:force": "node scripts/push-all.js --force"
+  },
   "dependencies": {
     "acorn": "^8.16.0"
   },

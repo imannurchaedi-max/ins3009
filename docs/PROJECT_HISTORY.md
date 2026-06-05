@@ -374,8 +374,9 @@ Tab `Cek Absen` masih bisa dibuka sebagai halaman lokal di `HOME_PORTAL`, `GATE_
 - Logika `switchTab()` memilih mode lokal hanya karena `page-cek-absen` ada di DOM.
 
 **Solusi**
-- Mengubah `switchTab()` pada `HOME_PORTAL`, `MODUL_GATE_PABRIK`, dan `MODUL_AREA_KERJA` agar tab report selalu diarahkan ke URL modul `REPORT`.
-- Dengan begitu request `getAbsenReport()` dan `getAreaActivityReport()` selalu diproses oleh backend report yang benar.
+- Mengubah `switchTab()` pada `HOME_PORTAL`, `MODUL_GATE_PABRIK`, dan `MODUL_AREA_KERJA` agar tab report selalu diarahkan ke URL modul `REPORT` lengkap dengan parameter `tab`.
+- Mengubah `processAbsenReport()` lokal di modul non-report menjadi redirect ke `MODUL_REPORT` dengan filter NIK/periode yang sudah dipilih user.
+- Menambahkan pembaca route parameter di `MODUL_REPORT` agar filter terisi otomatis dan query report bisa langsung jalan setelah user dialihkan.
 
 ## Langkah Lanjutan yang Masih Layak
 

@@ -316,6 +316,18 @@ function handleLoginSubmit() {
     .verifyLogin(nik, pwd);
 }
 
+function buildModuleTokenParams(extraParams) {
+  const params = new URLSearchParams();
+  if (STATE.currentUser && STATE.currentUser.nik) params.set('nik', STATE.currentUser.nik);
+  Object.entries(extraParams || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    const normalized = String(value).trim();
+    if (normalized) params.set(key, normalized);
+  });
+  const query = params.toString();
+  return query ? '?' + query : '';
+}
+
 // ── Tab switching ──────────────────────────────────────────
 async function switchTab(tab) {
   const tabbar = document.getElementById('app-tabbar');
@@ -346,7 +358,7 @@ async function switchTab(tab) {
       else targetUrl = urls.AREA_KERJA;
     }
     else if (tab.includes('cek') || tab.includes('export')) {
-      targetUrl = urls.REPORT;
+      targetUrl = urls.REPORT + buildModuleTokenParams({ tab });
     }
 
     if (isLocal) {
@@ -371,7 +383,7 @@ async function switchTab(tab) {
       if ((tab === 'cek-absen' || tab === 'cek-area') && typeof updatePeriodInput === 'function') updatePeriodInput();
     } 
     else if (targetUrl) {
-      window.top.location.href = targetUrl + token;
+      window.top.location.href = targetUrl.includes('?') ? targetUrl : targetUrl + token;
     } 
     else {
       alert('URL Module belum dikonfigurasi di CONFIG_MODUL!');
@@ -691,16 +703,31 @@ function processAbsenReport() {
   if (!nik && !deptFilter) { showResult('cek-absen', 'error', 'Masukkan NIK terlebih dahulu.'); return; }
   if (!periodValue) { showResult('cek-absen', 'error', 'Pilih periode terlebih dahulu.'); return; }
 
-  showResult('cek-absen', 'warning', 'Memproses data absen...');
+  showResult('cek-absen', 'warning', 'Mengalihkan ke modul report...');
   list.innerHTML = '<div class="skeleton-block skeleton-loader"></div><div class="skeleton-block skeleton-loader"></div><div class="skeleton-block skeleton-loader"></div>';
 
   google.script.run
     .withFailureHandler(err => {
       handleGasFailure('cek-absen', err);
-      list.innerHTML = '<div class="loading">Gagal memuat catatan absen.</div>';
+      list.innerHTML = '<div class="loading">Gagal membuka modul report.</div>';
     })
-    .withSuccessHandler(renderAbsenReport)
-    .getAbsenReport(nik, deptFilter, periodType, periodValue);
+    .withSuccessHandler(urls => {
+      const targetUrl = urls && urls.REPORT;
+      if (!targetUrl) {
+        showResult('cek-absen', 'error', 'URL modul report belum dikonfigurasi.');
+        list.innerHTML = '<div class="loading">Modul report tidak tersedia.</div>';
+        return;
+      }
+      const query = buildModuleTokenParams({
+        tab: 'cek-absen',
+        reportNik: nik,
+        reportPeriodType: periodType,
+        reportPeriodValue: periodValue,
+        autoRun: '1'
+      });
+      window.top.location.href = targetUrl + query;
+    })
+    .getModuleUrls();
 }
 
 function renderAbsenReport(res) {

@@ -55,6 +55,31 @@ const REPORT_CACHE = {
   absen: null
 };
 
+const ROUTE_STATE = readRouteState();
+
+function readRouteState() {
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    return {
+      tab: String(params.get('tab') || '').trim(),
+      reportNik: String(params.get('reportNik') || '').trim(),
+      reportPeriodType: String(params.get('reportPeriodType') || '').trim(),
+      reportPeriodValue: String(params.get('reportPeriodValue') || '').trim(),
+      autoRun: params.get('autoRun') === '1',
+      absenApplied: false
+    };
+  } catch (_) {
+    return {
+      tab: '',
+      reportNik: '',
+      reportPeriodType: '',
+      reportPeriodValue: '',
+      autoRun: false,
+      absenApplied: false
+    };
+  }
+}
+
 function getIncomingSessionNik() {
   if (typeof GLOBAL_SESSION_NIK === 'undefined') return '';
   return String(GLOBAL_SESSION_NIK || '').trim();
@@ -174,6 +199,10 @@ function applyRolePermissions(role) {
   else if (roleKey === 'PENGAWAS') defaultTab = 'cek-absen';
   else if (roleKey === 'SECURITY') defaultTab = 'security';
   else defaultTab = 'masuk';
+
+  if (ROUTE_STATE.tab && TABS[ROUTE_STATE.tab] && TABS[ROUTE_STATE.tab].includes(roleKey)) {
+    defaultTab = ROUTE_STATE.tab;
+  }
 
   for (const tab in TABS) {
     const btn = document.getElementById('tab-btn-' + tab);
@@ -313,6 +342,7 @@ async function switchTab(tab) {
       if (tab === 'dashboard' && typeof loadDashboard === 'function') loadDashboard();
       if (tab === 'security' && typeof loadRecentLogs === 'function') loadRecentLogs();
       if ((tab === 'cek-absen' || tab === 'cek-area') && typeof updatePeriodInput === 'function') updatePeriodInput();
+      if (tab === 'cek-absen') applyPendingAbsenRoute();
     } 
     else if (targetUrl) {
       window.top.location.href = targetUrl + token;
@@ -797,6 +827,26 @@ function processAbsenReport() {
       renderAbsenReport(res);
     })
     .getAbsenReport(nik, deptFilter, periodType, periodValue);
+}
+
+function applyPendingAbsenRoute() {
+  if (ROUTE_STATE.absenApplied || ROUTE_STATE.tab !== 'cek-absen') return;
+
+  const nikInput = document.getElementById('cek-absen-nik');
+  const periodTypeInput = document.getElementById('cek-absen-period-type');
+  const periodValueInput = document.getElementById('cek-absen-period-value');
+
+  if (nikInput && ROUTE_STATE.reportNik) nikInput.value = ROUTE_STATE.reportNik;
+  if (periodTypeInput && ROUTE_STATE.reportPeriodType) {
+    periodTypeInput.value = ROUTE_STATE.reportPeriodType;
+    updatePeriodInput('cek-absen');
+  }
+  if (periodValueInput && ROUTE_STATE.reportPeriodValue) periodValueInput.value = ROUTE_STATE.reportPeriodValue;
+
+  ROUTE_STATE.absenApplied = true;
+  if (ROUTE_STATE.autoRun) {
+    window.setTimeout(() => processAbsenReport(), 120);
+  }
 }
 
 function renderAbsenReport(res) {

@@ -378,6 +378,10 @@ Tab `Cek Absen` masih bisa dibuka sebagai halaman lokal di `HOME_PORTAL`, `GATE_
 - Mengubah `processAbsenReport()` lokal di modul non-report menjadi redirect ke `MODUL_REPORT` dengan filter NIK/periode yang sudah dipilih user.
 - Menambahkan pembaca route parameter di `MODUL_REPORT` agar filter terisi otomatis dan query report bisa langsung jalan setelah user dialihkan.
 
+**Status verifikasi**
+- Jalur `Cek Absen` untuk role `KARYAWAN` dinyatakan cukup oleh user setelah routing dipaksa ke `MODUL_REPORT`.
+- Tidak ada perubahan lanjutan yang diminta untuk flow `KARYAWAN` pada tahap ini.
+
 ## Langkah Lanjutan yang Masih Layak
 
 1. QA manual penuh untuk semua role live.

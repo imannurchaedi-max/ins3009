@@ -160,21 +160,40 @@ function hydrateAuthenticatedUser(user, depts) {
 
 
 
-  STATE.masuk.selectedNIK = user.nik;
-  STATE.masuk.selectedNama = user.nama;
-  STATE.masuk.selectedType = user.type;
-  STATE.masuk.selectedDept = user.dept;
-  STATE.masuk.selectedJabatan = user.jabatan;
-  STATE.masuk.completed = false;
+  const validRoles   = ['ADMINISTRATOR', 'PENGAWAS', 'SECURITY'];
+  const isAssistRole = validRoles.includes(user.role);
 
-  const inNik = document.getElementById('masuk-nik');
-  const inNama = document.getElementById('masuk-nama-input');
-  const inDept = document.getElementById('masuk-dept');
-  const inJabatan = document.getElementById('masuk-jabatan');
-  if (inNik) inNik.value = user.nik;
-  if (inNama) inNama.value = user.nama;
-  if (inDept) inDept.value = user.dept || '';
-  if (inJabatan) inJabatan.value = user.jabatan || '';
+  if (isAssistRole) {
+    STATE.masuk.selectedNIK     = null;
+    STATE.masuk.selectedNama    = null;
+    STATE.masuk.selectedType    = null;
+    STATE.masuk.selectedDept    = null;
+    STATE.masuk.selectedJabatan = null;
+    STATE.masuk.completed       = false;
+    const inNik     = document.getElementById('masuk-nik');
+    const inNama    = document.getElementById('masuk-nama-input');
+    const inDept    = document.getElementById('masuk-dept');
+    const inJabatan = document.getElementById('masuk-jabatan');
+    if (inNik)     inNik.value     = '';
+    if (inNama)    inNama.value    = '';
+    if (inDept)    inDept.value    = '';
+    if (inJabatan) inJabatan.value = '';
+  } else {
+    STATE.masuk.selectedNIK     = user.nik;
+    STATE.masuk.selectedNama    = user.nama;
+    STATE.masuk.selectedType    = user.type;
+    STATE.masuk.selectedDept    = user.dept;
+    STATE.masuk.selectedJabatan = user.jabatan;
+    STATE.masuk.completed       = false;
+    const inNik     = document.getElementById('masuk-nik');
+    const inNama    = document.getElementById('masuk-nama-input');
+    const inDept    = document.getElementById('masuk-dept');
+    const inJabatan = document.getElementById('masuk-jabatan');
+    if (inNik)     inNik.value     = user.nik;
+    if (inNama)    inNama.value    = user.nama;
+    if (inDept)    inDept.value    = user.dept || '';
+    if (inJabatan) inJabatan.value = user.jabatan || '';
+  }
 
   applyRolePermissions(user.role);
   updateMasukScannerVisibility();
@@ -270,17 +289,21 @@ function applyRolePermissions(role) {
       absenNik.disabled = true;
     }
     
-    const masukSearch = document.getElementById('masuk-nik-input');
-    if (masukSearch) {
-      if (roleKey === 'KARYAWAN') {
-         masukSearch.disabled = true;
-         masukSearch.placeholder = "Pencarian dinonaktifkan khusus Karyawan";
-         masukSearch.style.backgroundColor = "#e9ecef";
-      } else {
-         masukSearch.disabled = false;
-         masukSearch.placeholder = "Masukkan NIK atau biarkan kosong";
-         masukSearch.style.backgroundColor = "";
-      }
+    const masukSearch    = document.getElementById('masuk-nik-input');
+    const masukBanner    = document.getElementById('masuk-assist-banner');
+    const masukSearchFld = document.getElementById('masuk-search-field');
+    const masukDivider   = document.getElementById('masuk-data-divider');
+
+    if (roleKey === 'KARYAWAN') {
+      if (masukSearch)    { masukSearch.disabled = true; }
+      if (masukSearchFld) masukSearchFld.style.display = 'none';
+      if (masukBanner)    masukBanner.style.display = 'none';
+      if (masukDivider)   masukDivider.style.display = 'none';
+    } else {
+      if (masukSearch)    { masukSearch.disabled = false; masukSearch.placeholder = 'Ketik NIK atau nama karyawan...'; }
+      if (masukSearchFld) masukSearchFld.style.display = 'block';
+      if (masukBanner)    masukBanner.style.display = 'block';
+      if (masukDivider)   masukDivider.style.display = 'block';
     }
   }
 
@@ -461,7 +484,11 @@ function selectKaryawan(context, nik, nama, type, dept, jabatan) {
   STATE[context].selectedType    = type;
   STATE[context].selectedDept    = dept;
   STATE[context].selectedJabatan = jabatan;
-  if (context === 'masuk') STATE.masuk.completed = false;
+  if (context === 'masuk') {
+    STATE.masuk.completed = false;
+    const divider = document.getElementById('masuk-data-divider');
+    if (divider) divider.style.display = 'block';
+  }
 
   const searchInput = document.getElementById(context + '-search') || document.getElementById(context + '-nik-input');
   if (searchInput) searchInput.value = nama + ' (' + nik + ')';

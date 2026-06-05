@@ -73,6 +73,11 @@ function scanAreaKerja(noKartuMK, tujuan, catatan, forceMode) {
   return withDocumentLock(function() {
     try {
       const no = assertCard(noKartuMK);
+      const areaTujuan = asText(tujuan).trim();
+      const areaCatatan = asText(catatan).trim();
+      if (!areaTujuan) {
+        return { ok: false, msg: 'Area pengawasan wajib dipilih sebelum scan.' };
+      }
       
       let kar = getKaryawanByNIK(no);
       if (!kar) {
@@ -121,13 +126,15 @@ function scanAreaKerja(noKartuMK, tujuan, catatan, forceMode) {
         formatTime(now),
         kar.nik,
         kar.nama,
-        kar.dept || '',
-        kar.jabatan || ''
+        areaTujuan,
+        areaCatatan
       ]);
 
       return {
         ok: true, inout, noKartuMK: no, karyawan: kar, waktu,
-        msg: `${kar.nama} -> ${inout === 'IN' ? 'MASUK Area Kerja' : 'KELUAR Area Kerja'}`
+        area: areaTujuan,
+        catatan: areaCatatan,
+        msg: `${kar.nama} -> ${inout === 'IN' ? 'MASUK Area Kerja' : 'KELUAR Area Kerja'} (${areaTujuan})`
       };
     } catch(e) {
       return { ok: false, msg: e.message };
@@ -183,7 +190,8 @@ function getRecentAreaLogs(limit) {
       rows.push({
         noKartuMK: normalizeCard(data[i][0]), inout: asText(data[i][1]),
         tanggal: asText(data[i][2]), jam: asText(data[i][3]),
-        nik: asText(data[i][4]), nama: asText(data[i][5])
+        nik: asText(data[i][4]), nama: asText(data[i][5]),
+        tujuan: asText(data[i][6]), catatan: asText(data[i][7])
       });
     }
     return { ok: true, data: rows };

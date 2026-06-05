@@ -180,6 +180,8 @@ function getAreaActivityReport(nik, deptFilter, periodType, periodValue) {
         nama: asText(data[i][5]) || asText(employee.nama),
         dept: asText(employee.dept),
         jabatan: asText(employee.jabatan),
+        tujuan: asText(data[i][6]),
+        catatan: asText(data[i][7]),
         sortKey: formatDateForSort(data[i][2]) + asText(data[i][3])
       });
     }

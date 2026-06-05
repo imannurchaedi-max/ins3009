@@ -382,6 +382,21 @@ Tab `Cek Absen` masih bisa dibuka sebagai halaman lokal di `HOME_PORTAL`, `GATE_
 - Jalur `Cek Absen` untuk role `KARYAWAN` dinyatakan cukup oleh user setelah routing dipaksa ke `MODUL_REPORT`.
 - Tidak ada perubahan lanjutan yang diminta untuk flow `KARYAWAN` pada tahap ini.
 
+## FASE 27: Area Shift untuk Security dan Pengawas
+
+**Tanggal**
+2026-06-05
+
+**Kondisi awal**
+Petugas `SECURITY` dan `PENGAWAS` belum punya konteks area tetap di awal shift, sehingga scan area kerja belum mengikat log ke area pengawasan tertentu.
+
+**Solusi**
+- Menambahkan dropdown `Area yang Diawasi` pada halaman `security` di `MODUL_AREA_KERJA`.
+- Area dipilih sekali di awal shift dan disimpan per user-per-shift di browser, lalu otomatis dipakai untuk semua scan berikutnya.
+- Role `PENGAWAS` sekarang juga langsung mendarat ke halaman `security` saat masuk modul area kerja.
+- Log `REGISTRASI MASUK KELUAR AREA KERJA` kini menulis `TUJUAN` sebagai area pengawasan dan `CATATAN` sebagai alasan scan.
+- Report aktivitas area dan log terbaru ikut menampilkan area yang diawasi.
+
 ## Langkah Lanjutan yang Masih Layak
 
 1. QA manual penuh untuk semua role live.

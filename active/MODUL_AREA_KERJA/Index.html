@@ -228,6 +228,22 @@
     <div class="card-title">Scan Kartu MK / NIK - Area Kerja</div>
     <p style="font-size:12px;color:#888;margin-bottom:16px">Security scan setiap karyawan keluar/masuk area kerja</p>
 
+    <div class="field" style="margin-bottom: 16px;">
+      <label>Area yang Diawasi</label>
+      <div class="serial-row">
+        <select id="security-area-select" style="flex:1 1 auto;">
+          <option value="">Pilih area shift...</option>
+          <option value="Produksi">Produksi</option>
+          <option value="WRM">WRM</option>
+          <option value="WFG">WFG</option>
+          <option value="Utility - Cacah">Utility - Cacah</option>
+          <option value="Umum">Umum</option>
+        </select>
+        <button data-action="set-security-area" type="button">SET AREA</button>
+      </div>
+      <div id="security-area-hint" style="margin-top:8px;font-size:12px;color:#666;">Pilih sekali di awal shift. Semua scan berikutnya akan otomatis tercatat ke area ini.</div>
+    </div>
+
     <button class="btn btn-scan-qr" type="button" onclick="openLiveScanner('security')" style="display:flex; width: 100%; margin-bottom: 16px; justify-content: center; cursor: pointer; border: none; align-items:center;">
       <i class="bi bi-camera" style="font-size:28px; margin-right: 12px;"></i>
       <span>BUKA KAMERA (SCAN)</span>

@@ -1026,6 +1026,7 @@ function renderAreaReport(res) {
           <strong>${row.inout === 'IN' ? 'MASUK Area Kerja' : 'KELUAR Area Kerja'}</strong>
           <span>${escHtml(row.nama || row.nik)} - ${escHtml(row.nik)}</span>
           <span>${escHtml(row.dept || '-')} - ${escHtml(row.jabatan || '-')}</span>
+          <span>Area: ${escHtml(row.tujuan || '-')} - Catatan: ${escHtml(row.catatan || '-')}</span>
           <div class="time-pair">
             <span class="time-pill ${row.inout === 'OUT' ? 'out' : ''}">${escHtml(row.inout)}</span>
             <span class="time-pill">Kartu ${escHtml(row.noKartuMK || '-')}</span>

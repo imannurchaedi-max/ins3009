@@ -3,27 +3,22 @@
     {
       "name": "HOME_PORTAL",
       "dir": "active/HOME_PORTAL",
-      "deploymentId": "AKfycbzoALF7oD-WRuyhwp22pdQ6l3fGLRJuQ-OSnb5AizG-MBcOul5m74z6Xtq-hQ5IEsqX",
-      "frozen": true,
-      "_note": "Shell utama — URL TIDAK PERNAH diganti. frozen:true = push only, no redeploy."
+      "deploymentId": "AKfycbzoALF7oD-WRuyhwp22pdQ6l3fGLRJuQ-OSnb5AizG-MBcOul5m74z6Xtq-hQ5IEsqX"
     },
     {
       "name": "MODUL_GATE_PABRIK",
       "dir": "active/MODUL_GATE_PABRIK",
-      "deploymentId": "AKfycbyjQ36Nlastyw1xBgzvojgX6QH2oPxB6462YKg0sELBb3gb08dYQuKHz5X_RLFntfoV9g",
-      "frozen": false
+      "deploymentId": "AKfycbyjQ36Nlastyw1xBgzvojgX6QH2oPxB6462YKg0sELBb3gb08dYQuKHz5X_RLFntfoV9g"
     },
     {
       "name": "MODUL_AREA_KERJA",
       "dir": "active/MODUL_AREA_KERJA",
-      "deploymentId": "AKfycbyu6uW7XgdZPtJysgtf3x0i3E7cxR5Hrb_dZNKYns0QJ6Lef7xzbC0mT3uP_rREHz5ypA",
-      "frozen": false
+      "deploymentId": "AKfycbyu6uW7XgdZPtJysgtf3x0i3E7cxR5Hrb_dZNKYns0QJ6Lef7xzbC0mT3uP_rREHz5ypA"
     },
     {
       "name": "MODUL_REPORT",
       "dir": "active/MODUL_REPORT",
-      "deploymentId": "AKfycbycdcUt4y9RdoQIOTnIzWs6AxyZe5JayFhbk6f9abnv5kr3VAWapXicdVvRGn3o53BS",
-      "frozen": false
+      "deploymentId": "AKfycbycdcUt4y9RdoQIOTnIzWs6AxyZe5JayFhbk6f9abnv5kr3VAWapXicdVvRGn3o53BS"
     }
   ]
 }

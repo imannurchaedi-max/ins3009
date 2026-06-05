@@ -192,10 +192,11 @@ function bindKartu(noKartuMK, nik, loker) {
                       ${escHtml(existing.dept || '-')} · ${escHtml(existing.jabatan || '-')}<br>
                       <span style="font-size:11px; color:#666;">Sejak: ${escHtml(existing.waktuBind || '-')}</span>
                     </div>
-                    <div style="margin-top:6px; font-size:12px; color:#dc3545; margin-bottom:8px">Harap selesaikan proses KELUAR pabrik terlebih dahulu, atau gunakan opsi release paksa:</div>
-                    <button type="button" class="btn btn-danger" style="width:100%; font-size:12px; font-weight:bold; border-radius:4px" onclick="forceReleaseOldCard('${no}')">
-                      <i class="bi bi-unlock-fill"></i> RELEASE PAKSA KARTU ${no}
-                    </button>`
+                    <div style="margin-top:8px; font-size:12px; color:#dc3545;">
+                      Kartu ini masih aktif. Harap datang ke <strong>Security</strong> dengan kartu fisik agar proses release binding dilakukan oleh petugas.
+                    </div>`,
+          requiresSecurityRelease: true,
+          boundCardNo: no
         };
       }
       const sheetB = getSheet(SHEET_BINDING);
@@ -210,9 +211,11 @@ function bindKartu(noKartuMK, nik, loker) {
                       <div style="margin-top:8px; padding:8px; background:rgba(255,255,255,0.7); border-radius:4px; color:#333; font-size:13px; text-align:left; border-left:3px solid #dc3545; margin-bottom:8px">
                         Karyawan ini belum melakukan proses KELUAR untuk mengembalikan kartu lamanya.
                       </div>
-                      <button type="button" class="btn btn-danger" style="width:100%; font-size:12px; font-weight:bold; border-radius:4px" onclick="forceReleaseOldCard('${oldKartu}')">
-                        <i class="bi bi-unlock-fill"></i> RELEASE PAKSA KARTU ${oldKartu}
-                      </button>`
+                      <div style="font-size:12px; color:#dc3545;">
+                        Harap datang ke <strong>Security</strong> dengan kartu MK fisik agar binding kartu lama bisa dilepas oleh petugas.
+                      </div>`,
+            requiresSecurityRelease: true,
+            boundCardNo: oldKartu
           };
         }
       }
@@ -242,6 +245,12 @@ function releaseKartu(noKartuMK, loker) {
   return withDocumentLock(function() {
     try {
       const no = assertCard(noKartuMK);
+      if (asText(loker).trim().toUpperCase() === 'FORCE_RELEASE') {
+        return {
+          ok: false,
+          msg: 'Release paksa mandiri dinonaktifkan. Datang ke Security dan minta petugas scan kartu MK fisik untuk melepas binding.'
+        };
+      }
       
       const kar = getKaryawanByNIK(no);
       if (kar) {

@@ -327,6 +327,23 @@ Barcode 1D pada kartu identitas sering gagal terbaca, terutama saat foto miring,
 - Menambahkan preprocessing gambar berbasis crop, rotasi, upscale, grayscale, dan threshold sebelum decode barcode.
 - Menambahkan fallback OCR berbasis `tesseract.js` untuk mengekstrak NIK/serial dari teks kartu bila barcode tetap gagal.
 
+## FASE 24: Kunci Release Binding ke Security
+
+**Tanggal**
+2026-06-05
+
+**Kondisi awal**
+Karyawan mitra yang masih terikat kartu lama masih bisa melihat jalur release paksa dari flow masuk, sehingga mereka bisa mencoba melepas binding sendiri.
+
+**Akar masalah**
+- `bindKartu()` membangun tombol `RELEASE PAKSA` langsung di `htmlMsg` konflik kartu/NIK.
+- Frontend gate masih memiliki handler global `forceReleaseOldCard()` yang benar-benar memanggil `releaseKartu(..., 'FORCE_RELEASE')`.
+
+**Solusi**
+- Menghapus tombol release paksa dari respons konflik masuk dan menggantinya dengan instruksi datang ke Security dengan kartu fisik.
+- Memblokir request `FORCE_RELEASE` di backend `releaseKartu()`.
+- Meng-override handler lama di frontend agar semua jalur release mandiri diarahkan ke Security.
+
 ## Langkah Lanjutan yang Masih Layak
 
 1. QA manual penuh untuk semua role live.

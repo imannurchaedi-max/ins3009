@@ -560,6 +560,16 @@ window.forceReleaseOldCard = function(oldKartu) {
     .releaseKartu(oldKartu, 'FORCE_RELEASE');
 };
 
+// Override legacy force-release flow: kartu lama hanya boleh dilepas oleh security
+window.forceReleaseOldCard = function(oldKartu) {
+  showResult(
+    'masuk',
+    'warning',
+    `Release mandiri untuk kartu <strong>${escHtml(oldKartu)}</strong> dinonaktifkan. Datang ke <strong>Security</strong> dan minta petugas scan kartu MK fisik untuk melepas binding.`
+  );
+  document.getElementById('masuk-confirm').classList.remove('visible');
+};
+
 function resetMasuk() {
   STATE.masuk.scannedSerial = null;
   STATE.masuk.completed = true;

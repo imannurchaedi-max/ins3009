@@ -609,7 +609,7 @@ function setupModuleUrls() {
   }
 
   Logger.log('CONFIG_MODUL updated:\n' + Object.entries(URLS).map(([k, v]) => `  ${k}: ${v}`).join('\n'));
-  SpreadsheetApp.getUi && SpreadsheetApp.getUi().alert('CONFIG_MODUL berhasil diperbarui!');
+  try { SpreadsheetApp.getUi().alert('CONFIG_MODUL berhasil diperbarui!'); } catch(e) { /* tidak tersedia di Script Editor */ }
 }
 
 function getModuleUrls() {

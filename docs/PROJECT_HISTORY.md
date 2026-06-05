@@ -309,6 +309,24 @@ Error `escHtml is not defined` muncul di gate, dan pola yang sama berpotensi mun
 - Menghapus helper duplikat dari backend gate agar kembali mengandalkan util bersama.
 - Menyelaraskan pesan `htmlMsg` backend yang masih memakai nilai mentah menjadi tersanitasi.
 
+## FASE 23: Hardening Scanner Barcode Kartu
+
+**Tanggal**
+2026-06-05
+
+**Kondisi awal**
+Barcode 1D pada kartu identitas sering gagal terbaca, terutama saat foto miring, barcode kecil, atau kontras cetak rendah.
+
+**Akar masalah**
+- Format barcode yang didukung scanner masih sempit.
+- Fallback foto hanya mencoba decode gambar mentah tanpa preprocessing.
+- Saat barcode gagal, tidak ada fallback untuk membaca NIK/serial yang tercetak di kartu.
+
+**Solusi**
+- Memperluas format barcode native dan `html5-qrcode` untuk barcode 1D/2D yang lebih banyak.
+- Menambahkan preprocessing gambar berbasis crop, rotasi, upscale, grayscale, dan threshold sebelum decode barcode.
+- Menambahkan fallback OCR berbasis `tesseract.js` untuk mengekstrak NIK/serial dari teks kartu bila barcode tetap gagal.
+
 ## Langkah Lanjutan yang Masih Layak
 
 1. QA manual penuh untuk semua role live.

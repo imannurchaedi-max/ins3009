@@ -581,9 +581,9 @@ function include(filename) {
 function setupModuleUrls() {
   const URLS = {
     HOME_PORTAL:  'https://script.google.com/macros/s/AKfycbzoALF7oD-WRuyhwp22pdQ6l3fGLRJuQ-OSnb5AizG-MBcOul5m74z6Xtq-hQ5IEsqX/exec',
-    GATE_PABRIK:  'https://script.google.com/macros/s/AKfycbzjc_FGR9F9TdmI5rH6CKjojZD-85aR2Jk52H-BFAJRYqoAsunwTICRqevSfrHylqOITQ/exec',
-    AREA_KERJA:   'https://script.google.com/macros/s/AKfycbxGtjynXmw6q_J1jz3G9gFZ_9alZIevf40L2QaI-WZ8rr_d-Hh-6Z7wVqOvD-yb281e6A/exec',
-    REPORT:       'https://script.google.com/macros/s/AKfycbx0e2PsHEB1grHJyshEIwh-CYTSfuOVPOYbCPfvNAFLIJEng1tHYUhSQABICjR3QAwI/exec',
+    GATE_PABRIK:  'https://script.google.com/macros/s/AKfycbxS2rvxwlxbUpsNvBjAl7gbcg-NEBrIuhGpGKUX402S_Z-n94Im1U8QWQ4pzSlacbJk0Q/exec',
+    AREA_KERJA:   'https://script.google.com/macros/s/AKfycbzvhK7-WhHfh20VkHUiJqI8vWUNYrt2H783ktYogOy-W6Oj761lRy8Ilj4ZHSzBSjhMSQ/exec',
+    REPORT:       'https://script.google.com/macros/s/AKfycbxNp_aCwyOxg0tymk2oeJViieNXGTj3P6wR_3uDgRMm1_AT8gvxd01WAUy2SdW6IH3a/exec',
   };
 
   const ss = getSpreadsheet();

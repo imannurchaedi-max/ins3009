@@ -290,7 +290,7 @@ function handleLoginSubmit() {
       STATE.currentUser = res.karyawan;
       if (res.depts) STATE.availableDepts = res.depts;
       
-      localStorage.setItem('dam_session', JSON.stringify(res.karyawan));
+      localStorage.setItem('dam_session', JSON.stringify({ ...res.karyawan, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 }));
       
       // Populate security-dept dropdown
       
@@ -1454,23 +1454,27 @@ document.addEventListener('DOMContentLoaded', () => {
   if (savedSession) {
     try {
       const user = JSON.parse(savedSession);
-      STATE.currentUser = user;
-      STATE.masuk.selectedNIK = user.nik;
-      STATE.masuk.selectedNama = user.nama;
-      STATE.masuk.selectedDept = user.dept;
-      STATE.masuk.selectedJabatan = user.jabatan;
-      
-      const inNik = document.getElementById('masuk-nik');
-      const inNama = document.getElementById('masuk-nama-input');
-      const inDept = document.getElementById('masuk-dept');
-      const inJabatan = document.getElementById('masuk-jabatan');
-      if (inNik) inNik.value = user.nik;
-      if (inNama) inNama.value = user.nama;
-      if (inDept) inDept.value = user.dept || '';
-      if (inJabatan) inJabatan.value = user.jabatan || '';
+      if (user.exp && Date.now() > user.exp) {
+        localStorage.removeItem('dam_session');
+      } else {
+        STATE.currentUser = user;
+        STATE.masuk.selectedNIK = user.nik;
+        STATE.masuk.selectedNama = user.nama;
+        STATE.masuk.selectedDept = user.dept;
+        STATE.masuk.selectedJabatan = user.jabatan;
 
-      applyRolePermissions(user.role);
-      updateMasukScannerVisibility();
+        const inNik = document.getElementById('masuk-nik');
+        const inNama = document.getElementById('masuk-nama-input');
+        const inDept = document.getElementById('masuk-dept');
+        const inJabatan = document.getElementById('masuk-jabatan');
+        if (inNik) inNik.value = user.nik;
+        if (inNama) inNama.value = user.nama;
+        if (inDept) inDept.value = user.dept || '';
+        if (inJabatan) inJabatan.value = user.jabatan || '';
+
+        applyRolePermissions(user.role);
+        updateMasukScannerVisibility();
+      }
     } catch (e) {
       localStorage.removeItem('dam_session');
     }

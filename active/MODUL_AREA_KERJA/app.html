@@ -289,8 +289,7 @@ async function switchTab(tab) {
       else targetUrl = urls.AREA_KERJA;
     }
     else if (tab.includes('cek') || tab.includes('export')) {
-      if (document.getElementById('page-cek-absen')) isLocal = true;
-      else targetUrl = urls.REPORT;
+      targetUrl = urls.REPORT;
     }
 
     if (isLocal) {

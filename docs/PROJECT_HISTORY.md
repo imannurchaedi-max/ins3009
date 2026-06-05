@@ -361,6 +361,22 @@ Fitur `Cek Absen` bisa loading sangat lama pada recap yang sudah besar, dan user
 - Mengoptimalkan `getAbsenReport()` dengan pembacaan range terukur, filtering tanggal berbasis key string, dan cache singkat.
 - Menambahkan status frontend setelah 8 detik agar user tahu data masih diproses, bukan diam menggantung.
 
+## FASE 26: Paksa Jalur Report ke Modul REPORT
+
+**Tanggal**
+2026-06-05
+
+**Kondisi awal**
+Tab `Cek Absen` masih bisa dibuka sebagai halaman lokal di `HOME_PORTAL`, `GATE_PABRIK`, dan `AREA_KERJA`, padahal backend report aktif berada di modul `REPORT`.
+
+**Akar masalah**
+- Struktur shell frontend masih membawa halaman report lokal dari template bersama.
+- Logika `switchTab()` memilih mode lokal hanya karena `page-cek-absen` ada di DOM.
+
+**Solusi**
+- Mengubah `switchTab()` pada `HOME_PORTAL`, `MODUL_GATE_PABRIK`, dan `MODUL_AREA_KERJA` agar tab report selalu diarahkan ke URL modul `REPORT`.
+- Dengan begitu request `getAbsenReport()` dan `getAreaActivityReport()` selalu diproses oleh backend report yang benar.
+
 ## Langkah Lanjutan yang Masih Layak
 
 1. QA manual penuh untuk semua role live.

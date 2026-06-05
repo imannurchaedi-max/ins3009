@@ -114,7 +114,42 @@ if (doDeploy) {
     const lock = mod.frozen ? ' 🔒' : '';
     console.log(`   ${mod.name.padEnd(24)} ${BASE_URL}/${mod.deploymentId}/exec${lock}`);
   }
-  console.log('\n💡 Jalankan setupModuleUrls() di GAS Editor HOME_PORTAL\n   untuk update CONFIG_MODUL di spreadsheet.\n');
+  // ── AUTO-UPDATE CONFIG_MODUL di Google Sheet ─────────────
+  const gate   = CONFIG.modules.find(m => m.name === 'MODUL_GATE_PABRIK');
+  const area   = CONFIG.modules.find(m => m.name === 'MODUL_AREA_KERJA');
+  const report = CONFIG.modules.find(m => m.name === 'MODUL_REPORT');
+
+  if (gate && area && report) {
+    console.log('📋 Update CONFIG_MODUL di spreadsheet...');
+    const { execSync: run } = require('child_process');
+    try {
+      const out = run(
+        `python scripts/update_config_sheet.py` +
+        ` --gate-url "${BASE_URL}/${gate.deploymentId}/exec"` +
+        ` --area-url "${BASE_URL}/${area.deploymentId}/exec"` +
+        ` --report-url "${BASE_URL}/${report.deploymentId}/exec"`,
+        { cwd: ROOT, stdio: 'pipe' }
+      ).toString().trim();
+
+      // Bersihkan temp deployment kalau fallback dipakai
+      try {
+        const match = out.match(/"inject_url":\s*"[^"]+\/([^/]+)\/exec"/);
+        if (match) {
+          const tempId = match[1];
+          run(`clasp undeploy ${tempId}`, { cwd: path.join(ROOT, 'active', 'MODUL_GATE_PABRIK'), stdio: 'pipe' });
+        }
+      } catch (_) {}
+
+      if (out.includes('OK_CONFIG_MODUL_UPDATED') || out.includes('CONFIG_MODUL updated')) {
+        console.log('   ✅ CONFIG_MODUL berhasil diupdate.\n');
+      } else {
+        console.log('   ⚠️  ' + out.split('\n')[0] + '\n');
+      }
+    } catch (err) {
+      const msg = (err.stderr || err.stdout || err.message || '').toString().trim();
+      console.log('   ❌ Gagal update CONFIG_MODUL: ' + msg.split('\n')[0] + '\n');
+    }
+  }
 }
 
 process.exit(failed > 0 ? 1 : 0);

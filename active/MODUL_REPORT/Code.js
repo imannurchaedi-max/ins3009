@@ -33,6 +33,31 @@ function onOpen() {
 // ============================================================
 //  REPORT MODULE — getAbsenReport, getAreaActivityReport
 // ============================================================
+function toDateKey(value) {
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, 'Asia/Jakarta', 'yyyyMMdd');
+  }
+
+  const text = asText(value).trim();
+  let match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (match) return match[3] + match[2] + match[1];
+
+  match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) return match[1] + match[2] + match[3];
+
+  return formatDateForSort(text);
+}
+
+function buildAbsenReportCacheKey(nik, deptFilter, periodType, periodValue) {
+  return [
+    'absen',
+    asText(nik).trim() || '-',
+    asText(deptFilter).trim() || '-',
+    asText(periodType).trim() || '-',
+    asText(periodValue).trim() || '-'
+  ].join(':');
+}
+
 function getAbsenReport(nik, deptFilter, periodType, periodValue) {
   try {
     const targetNik = asText(nik).trim();
@@ -40,37 +65,57 @@ function getAbsenReport(nik, deptFilter, periodType, periodValue) {
     if (!targetNik && !filterDpt) return { ok: false, msg: 'Kriteria pencarian (NIK atau Departemen) wajib diisi.' };
 
     const range = getPeriodRange(periodType, periodValue);
+    const cache = CacheService.getScriptCache();
+    const cacheKey = buildAbsenReportCacheKey(targetNik, filterDpt, periodType, periodValue);
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+
     const sheet = getSheet(SHEET_RECAP_ABSEN);
-    const data = sheet.getDataRange().getValues();
+    const lastRow = sheet.getLastRow();
+    const width = SHEET_HEADERS[SHEET_RECAP_ABSEN].length;
+    if (lastRow <= 1) {
+      const emptyResult = { ok: true, period: range.label, total: 0, complete: 0, active: 0, data: [] };
+      cache.put(cacheKey, JSON.stringify(emptyResult), 90);
+      return emptyResult;
+    }
+
+    const data = sheet.getRange(2, 1, lastRow - 1, width).getDisplayValues();
+    const startKey = Utilities.formatDate(range.start, 'Asia/Jakarta', 'yyyyMMdd');
+    const endKey = Utilities.formatDate(range.end, 'Asia/Jakarta', 'yyyyMMdd');
 
     const rows = [];
     let complete = 0;
     let active = 0;
 
-    for (let i = 1; i < data.length; i++) {
-      const rowNik = asText(data[i][1]).trim();
-      const rowDept = asText(data[i][3]).trim();
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const dateKey = toDateKey(row[0]);
+      if (!dateKey || dateKey < startKey || dateKey > endKey) continue;
+
+      const rowNik = asText(row[1]).trim();
+      const rowDept = asText(row[3]).trim();
       
-      if (!isDateInRange(data[i][0], range)) continue;
       if (targetNik && rowNik !== targetNik) continue;
       if (filterDpt && rowDept !== filterDpt) continue;
 
-      const status = asText(data[i][7]);
+      const status = asText(row[7]);
       if (status === 'SELESAI') complete++;
       if (status === 'DI DALAM') active++;
 
       rows.push({
-        tanggal: asText(data[i][0]),
+        tanggal: asText(row[0]),
         nik: rowNik,
-        nama: asText(data[i][2]),
-        dept: asText(data[i][3]),
-        jabatan: asText(data[i][4]),
-        jamMasuk: asText(data[i][5]),
-        jamKeluar: asText(data[i][6]),
+        nama: asText(row[2]),
+        dept: rowDept,
+        jabatan: asText(row[4]),
+        jamMasuk: asText(row[5]),
+        jamKeluar: asText(row[6]),
         status,
-        noKartuMK: asText(data[i][8]),
-        noLoker: asText(data[i][9]),
-        sortKey: formatDateForSort(data[i][0])
+        noKartuMK: asText(row[8]),
+        noLoker: asText(row[9]),
+        sortKey: dateKey + '|' + asText(row[5] || '')
       });
     }
 
@@ -79,7 +124,7 @@ function getAbsenReport(nik, deptFilter, periodType, periodValue) {
     });
     rows.forEach(function(row) { delete row.sortKey; });
 
-    return {
+    const result = {
       ok: true,
       period: range.label,
       total: rows.length,
@@ -87,6 +132,8 @@ function getAbsenReport(nik, deptFilter, periodType, periodValue) {
       active,
       data: rows
     };
+    cache.put(cacheKey, JSON.stringify(result), 90);
+    return result;
   } catch(e) {
     return { ok: false, msg: e.message };
   }

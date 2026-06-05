@@ -816,13 +816,20 @@ function processAbsenReport() {
 
   showResult('cek-absen', 'warning', 'Memproses data absen...');
   list.innerHTML = '<div class="skeleton-block skeleton-loader"></div><div class="skeleton-block skeleton-loader"></div><div class="skeleton-block skeleton-loader"></div>';
+  const slowTimer = window.setTimeout(() => {
+    showResult('cek-absen', 'warning', 'Data absen cukup besar, sistem masih memproses. Mohon tunggu sebentar...');
+  }, 8000);
 
   google.script.run
     .withFailureHandler(err => {
+      window.clearTimeout(slowTimer);
       handleGasFailure('cek-absen', err);
       list.innerHTML = '<div class="loading">Gagal memuat catatan absen.</div>';
     })
-    .withSuccessHandler(renderAbsenReport)
+    .withSuccessHandler(res => {
+      window.clearTimeout(slowTimer);
+      renderAbsenReport(res);
+    })
     .getAbsenReport(nik, deptFilter, periodType, periodValue);
 }
 

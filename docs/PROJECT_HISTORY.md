@@ -344,6 +344,23 @@ Karyawan mitra yang masih terikat kartu lama masih bisa melihat jalur release pa
 - Memblokir request `FORCE_RELEASE` di backend `releaseKartu()`.
 - Meng-override handler lama di frontend agar semua jalur release mandiri diarahkan ke Security.
 
+## FASE 25: Optimasi Cek Absen
+
+**Tanggal**
+2026-06-05
+
+**Kondisi awal**
+Fitur `Cek Absen` bisa loading sangat lama pada recap yang sudah besar, dan user hanya melihat skeleton tanpa kepastian progres.
+
+**Akar masalah**
+- Backend `getAbsenReport()` membaca seluruh recap dengan `getDataRange()` lalu mem-parse tanggal baris per baris.
+- Tidak ada cache singkat untuk request periode yang sama.
+- Frontend belum memberi status tambahan saat proses report memang berat.
+
+**Solusi**
+- Mengoptimalkan `getAbsenReport()` dengan pembacaan range terukur, filtering tanggal berbasis key string, dan cache singkat.
+- Menambahkan status frontend setelah 8 detik agar user tahu data masih diproses, bukan diam menggantung.
+
 ## Langkah Lanjutan yang Masih Layak
 
 1. QA manual penuh untuk semua role live.

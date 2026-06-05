@@ -92,8 +92,25 @@
 
 <div id="page-masuk" class="page">
 
+  <!-- Banner konteks: hanya tampil untuk SECURITY / PENGAWAS / ADMINISTRATOR -->
+  <div id="masuk-assist-banner" style="display:none; background:#e8f4fd; border-left:4px solid #2196F3; border-radius:6px; padding:10px 14px; margin-bottom:12px; font-size:13px; color:#1565c0;">
+    <strong>Mode Bantu Karyawan</strong> — Cari NIK / Nama karyawan di bawah, lalu scan kartu MK untuk bind.
+    Karyawan yang tidak bisa bind sendiri bisa dibantu dari sini.
+  </div>
+
   <div class="card">
-    <div class="card-title">1. Data Karyawan</div>
+    <div class="card-title">1. Cari / Pilih Karyawan</div>
+
+    <!-- Search field: PRIMARY untuk SECURITY/PENGAWAS, hidden untuk KARYAWAN -->
+    <div class="field" id="masuk-search-field" style="margin-bottom: 14px;">
+      <label id="masuk-search-label" style="font-weight:600; color:#333;">Cari Karyawan (NIK / Nama)</label>
+      <div class="autocomplete-wrap">
+        <input type="text" id="masuk-nik-input" data-action="search-karyawan" data-context="masuk" placeholder="Ketik NIK atau nama karyawan..." autocomplete="off" autocapitalize="characters" style="text-transform:uppercase; border:1.5px solid #2196F3;">
+        <div id="masuk-list" class="autocomplete-list"></div>
+      </div>
+    </div>
+
+    <div class="divider" id="masuk-data-divider" style="display:none;">Data Karyawan Terpilih</div>
 
     <div class="field" style="margin-bottom: 12px;">
       <label>NIK</label>
@@ -110,13 +127,6 @@
     <div class="field" style="margin-bottom: 16px;">
       <label>Jabatan</label>
       <input type="text" id="masuk-jabatan" readonly style="background-color: #f5f5f5; color: #555;">
-    </div>
-    <div class="field" style="margin-bottom: 12px;">
-      <label>Cari berdasarkan NIK (Opsional)</label>
-      <div class="autocomplete-wrap">
-        <input type="text" id="masuk-nik-input" data-action="search-karyawan" data-context="masuk" placeholder="Masukkan NIK atau biarkan kosong" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">
-        <div id="masuk-list" class="autocomplete-list"></div>
-      </div>
     </div>
     <div class="field" style="margin-bottom: 16px;">
       <label>Nomor Loker (Opsional)</label>

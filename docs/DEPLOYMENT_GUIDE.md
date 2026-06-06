@@ -1,100 +1,92 @@
 # Deployment Guide
 
-Panduan ini mengikuti struktur repo aktif saat ini, yaitu semua source runtime berada di folder `active/`.
+Panduan ini mengikuti struktur repo aktif saat ini. Semua source runtime berada di `active/HOME_PORTAL/` sebagai shell utama.
 
 ## Prasyarat
 
-- `clasp` sudah terpasang dan login.
-- File `.clasp.json` per modul di `active/*/.clasp.json` sudah benar.
-- Akses ke spreadsheet master dan sheet `CONFIG_MODUL` tersedia.
+- `clasp` sudah terpasang dan login (`clasp login`)
+- `node` tersedia untuk menjalankan `npm run deploy`
+- `python` tersedia untuk `update_config_sheet.py`
+- File `.clasp.json` per modul di `active/*/.clasp.json` sudah benar
 
-## Lokasi Deploy
+## Deploy Utama
 
-- `active/HOME_PORTAL`
-  Container tetap. Tidak boleh ikut auto-deploy biasa.
-- `active/MODUL_GATE_PABRIK`
-- `active/MODUL_AREA_KERJA`
-- `active/MODUL_REPORT`
+Cukup satu perintah dari root project:
 
-## Workflow Aman
-
-1. Edit source hanya di `active/`.
-2. Jalankan audit:
-   - `python scripts/audit_project.py`
-   - `python scripts/extract_functions.py`
-   - `python scripts/compare_gas_runtime.py`
-3. Deploy modul.
-4. Update `CONFIG_MODUL`.
-5. Smoke test URL hasil deploy.
-
-## Deploy Semua Modul
-
-Perintah paling aman saat ini:
-
-```powershell
-python scripts/deploy_all.py
+```bash
+npm run deploy
 ```
 
-Script ini akan:
-- menjalankan `clasp push --force` per modul
-- menjalankan `clasp deploy`
-- mengambil URL `/exec`
-- memanggil `scripts/update_config_sheet.py`
-- mempertahankan baris `HOME_PORTAL` di `CONFIG_MODUL` apa adanya
-- membersihkan deployment lama modul jika batas deployment Apps Script sudah mendekati limit
+Yang terjadi:
+1. `clasp push` untuk semua 4 modul
+2. `clasp deploy -i <deploymentId>` — update in-place, **URL tidak berubah**
+3. `python scripts/update_config_sheet.py` — update CONFIG_MODUL sheet
 
-## Update CONFIG_MODUL
-
-Updater utama:
-
-```powershell
-python scripts/update_config_sheet.py ^
-  --gate-url "<url gate>" ^
-  --area-url "<url area>" ^
-  --report-url "<url report>"
+```bash
+npm run push          # push code saja, tanpa update deployment (lebih cepat)
+npm run deploy:force  # push --force jika ada konflik
 ```
 
-Catatan:
-- Jika Sheets API pada project OAuth `clasp` masih disabled, script ini punya fallback temporary injector melalui GAS.
-- Fallback tidak lagi memakai `HOME_PORTAL` sebagai injector.
-- Updater hanya menimpa `GATE_PABRIK`, `AREA_KERJA`, dan `REPORT`.
-- Baris `HOME_PORTAL` dibiarkan tetap sebagai URL container permanen.
+## URL Permanen HOME_PORTAL
 
-## Update HOME_PORTAL Tanpa Ganti URL
-
-Jika source `HOME_PORTAL` memang perlu diubah, gunakan update deployment in-place:
-
-```powershell
-python scripts/deploy_home_fixed.py --deployment-id "<deployment-id-home>"
+```
+https://script.google.com/macros/s/AKfycbzoALF7oD-WRuyhwp22pdQ6l3fGLRJuQ-OSnb5AizG-MBcOul5m74z6Xtq-hQ5IEsqX/exec
 ```
 
-Tujuannya:
-- push source `active/HOME_PORTAL`
-- update deployment HOME_PORTAL yang sudah ada
-- mempertahankan URL publik `/exec` yang sama
+URL ini **tidak pernah berubah** selama menggunakan `deploy -i`.
 
-## Verifikasi Setelah Deploy
+## Deployment IDs (module-config.json)
 
-Pastikan:
+```json
+{
+  "HOME_PORTAL":       "AKfycbzoALF7oD-WRuyhwp22pdQ6l3fGLRJuQ-OSnb5AizG-MBcOul5m74z6Xtq-hQ5IEsqX",
+  "MODUL_GATE_PABRIK": "AKfycbyjQ36Nlastyw1xBgzvojgX6QH2oPxB6462YKg0sELBb3gb08dYQuKHz5X_RLFntfoV9g",
+  "MODUL_AREA_KERJA":  "AKfycbyu6uW7XgdZPtJysgtf3x0i3E7cxR5Hrb_dZNKYns0QJ6Lef7xzbC0mT3uP_rREHz5ypA",
+  "MODUL_REPORT":      "AKfycbycdcUt4y9RdoQIOTnIzWs6AxyZe5JayFhbk6f9abnv5kr3VAWapXicdVvRGn3o53BS"
+}
+```
 
-1. `deployment_urls.json` hanya dianggap artifact lokal jika memang masih dipakai tooling pribadi.
-2. `CONFIG_MODUL` di spreadsheet memuat:
-   - `GATE_PABRIK`
-   - `AREA_KERJA`
-   - `REPORT`
-   - `HOME_PORTAL` sebagai URL tetap
-3. URL `/exec` masing-masing bisa dibuka.
-4. Smoke test minimum:
-   - login dari `HOME_PORTAL`
-   - buka `GATE_PABRIK`
-   - cek flow `MASUK`
-   - cek flow `KELUAR`
-   - buka `REPORT`
+## Workflow Modifikasi
+
+Karena semua logika terpusat di HOME_PORTAL:
+
+| Ubah apa | Edit file | Deploy |
+|----------|-----------|--------|
+| Logika gate/kartu | `active/HOME_PORTAL/GateFunctions.gs` | `npm run push` |
+| Logika scan area | `active/HOME_PORTAL/AreaFunctions.gs` | `npm run push` |
+| Laporan | `active/HOME_PORTAL/ReportFunctions.gs` | `npm run push` |
+| Utility/auth | `active/HOME_PORTAL/SharedLib.gs` | `npm run push` |
+| UI/frontend | `active/HOME_PORTAL/app.html` | `npm run push` |
+| Struktur halaman | `active/HOME_PORTAL/Index.html` | `npm run push` |
+
+Gunakan `npm run push` untuk update code tanpa versioning baru.
+Gunakan `npm run deploy` untuk deployment resmi (tetap URL sama).
+
+## Smoke Test Setelah Deploy
+
+1. Buka URL HOME_PORTAL
+2. Login sebagai tiap role (KARYAWAN, SECURITY, PENGAWAS, ADMINISTRATOR)
+3. Pastikan default tab sesuai role
+4. Coba tab MASUK → scan kartu
+5. Coba tab SCAN AREA → pilih area → scan
+6. Coba tab CEK ABSEN → proses tanpa NIK (SECURITY) dan dengan NIK (KARYAWAN)
+7. Pastikan URL **tidak berubah** saat pindah antar tab
 
 ## Aturan Operasional
 
 - Jangan deploy dari file root lama jika ada duplikasi dengan `active/`.
-- Jangan jadikan file di `reports/` sebagai dasar keputusan deploy; generate ulang jika perlu.
-- Jangan jalankan auto-deploy untuk `HOME_PORTAL` kecuali benar-benar bermaksud update in-place.
-- Setelah perubahan code runtime, audit dan deploy harus berjalan berurutan.
-- Jika ada perubahan struktur sheet, perbarui dokumentasi dan validasi header runtime sebelum release.
+- Jangan jadikan file di `reports/` sebagai dasar keputusan deploy.
+- Selalu gunakan `deploy -i` (via npm scripts) — jangan `clasp deploy` langsung tanpa `-i`.
+- Setelah perubahan structure sheet, perbarui `SharedLib.gs` (SHEET_HEADERS) sebelum deploy.
+- Update dokumentasi di `docs/` setiap ada perubahan arsitektur atau deployment.
+
+## Update CONFIG_MODUL Manual (jika perlu)
+
+```bash
+python scripts/update_config_sheet.py \
+  --gate-url "https://script.google.com/macros/s/<GATE_ID>/exec" \
+  --area-url "https://script.google.com/macros/s/<AREA_ID>/exec" \
+  --report-url "https://script.google.com/macros/s/<REPORT_ID>/exec"
+```
+
+Catatan: Jika Sheets API disabled, script ini punya fallback temporary GAS injector otomatis.

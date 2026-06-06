@@ -81,6 +81,13 @@ function readRouteState() {
 }
 
 function getIncomingSessionNik() {
+  // Baca langsung dari URL — lebih reliable dari template injection
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const urlNik = (params.get('nik') || '').trim();
+    if (urlNik) return urlNik;
+  } catch (_) {}
+  // Fallback ke template-injected value
   if (typeof GLOBAL_SESSION_NIK === 'undefined') return '';
   return String(GLOBAL_SESSION_NIK || '').trim();
 }
@@ -349,7 +356,7 @@ async function switchTab(tab) {
       if (tab === 'cek-absen') applyPendingAbsenRoute();
     } 
     else if (targetUrl) {
-      window.top.location.href = targetUrl + token;
+      window.top.location.replace = targetUrl + token;
     } 
     else {
       alert('URL Module belum dikonfigurasi di CONFIG_MODUL!');
@@ -1586,12 +1593,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const sessionNik = getIncomingSessionNik();
   if (sessionNik) {
+    // Ada ?nik= dari URL → verifikasi ke server (fallback ke localStorage jika gagal)
     beginModuleAutoLogin(sessionNik);
     return;
   }
 
+  // Tidak ada URL param → cek localStorage dulu, JANGAN tampil login dulu
+  if (restoreSavedSession()) return;
+
+  // Benar-benar tidak ada session → tampil login
   setLoginUiMode('login');
-  restoreSavedSession();
 });
 
 window.addEventListener('pageshow', () => {

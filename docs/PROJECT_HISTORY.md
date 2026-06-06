@@ -397,7 +397,96 @@ Petugas `SECURITY` dan `PENGAWAS` belum punya konteks area tetap di awal shift, 
 - Log `REGISTRASI MASUK KELUAR AREA KERJA` kini menulis `TUJUAN` sebagai area pengawasan dan `CATATAN` sebagai alasan scan.
 - Report aktivitas area dan log terbaru ikut menampilkan area yang diawasi.
 
+## FASE 28: Konsolidasi True Shell — Single URL Architecture
+
+**Tanggal**
+2026-06-06
+
+**Kondisi awal**
+HOME_PORTAL berfungsi sebagai redirect shell: setelah login, user langsung dipental ke URL modul lain (GATE_PABRIK, AREA_KERJA, REPORT). Setiap navigasi tab mengubah URL di browser, back button rusak, dan session localStorage tidak konsisten antar modul karena GAS app masing-masing berjalan di context iframe berbeda.
+
+**Akar masalah**
+- `switchTab()` di semua modul memanggil `getModuleUrls()` dan melakukan `window.top.location.href` ke URL modul lain.
+- `processAbsenReport()` di GATE_PABRIK/AREA_KERJA tidak memanggil `getAbsenReport()` langsung, melainkan redirect ke REPORT URL.
+- `HOME_PORTAL/app.html` berisi 133 baris kode lama terpotong di bagian atas file yang menyebabkan `SyntaxError` (deklarasi `const QR`, `const STATE` ganda).
+- `getIncomingSessionNik()` bergantung pada template injection server-side `<?= sessionNik ?>` yang bisa gagal akibat browser cache.
+
+**Solusi**
+- Semua halaman (`page-masuk`, `page-keluar`, `page-security`, `page-dashboard`, `page-cek-absen`, `page-cek-area`, dst.) dipindah ke `HOME_PORTAL/Index.html`.
+- Semua backend functions dari 3 modul dikonsolidasi ke HOME_PORTAL:
+  - `GateFunctions.gs` — bindKartu, releaseKartu, getBindingStatus, updateRecapAbsen
+  - `AreaFunctions.gs` — scanAreaKerja, getDashboardData, getRecentAreaLogs
+  - `ReportFunctions.gs` — getAbsenReport, getAreaActivityReport
+- `switchTab()` diubah menjadi fully local — tidak ada GAS call, tidak ada URL change.
+- `processAbsenReport()` memanggil `google.script.run.getAbsenReport()` langsung.
+- `getIncomingSessionNik()` membaca `?nik=` dari `window.location.search` client-side (tidak bergantung template server).
+- `DOMContentLoaded` HOME_PORTAL hanya cek `dam_session` localStorage; tidak ada `beginModuleAutoLogin`.
+- Hapus `Functions.gs` lama (digantikan 3 file domain-specific).
+- Semua navigasi antar modul menggunakan `location.replace()` (bukan `href`) sehingga back button tidak menumpuk history modul.
+
+**Hasil**
+- Satu URL permanen untuk semua user.
+- Tab switching instan tanpa page reload.
+- Back button berfungsi normal (hanya satu entry di history).
+- Session tidak perlu divalidasi ulang saat pindah tab.
+
+---
+
+## FASE 29: Role-Based Redirect Setelah Login
+
+**Tanggal**
+2026-06-06
+
+**Kondisi awal**
+Setelah login, semua user mendarat di halaman yang sama tanpa mempertimbangkan role.
+
+**Solusi**
+- `applyRolePermissions()` diberi parameter `fromLogin` (boolean).
+- Saat login baru (`fromLogin = true`): redirect ke default tab per role.
+  - KARYAWAN → tab MASUK
+  - SECURITY / PENGAWAS → tab SCAN AREA
+  - ADMINISTRATOR → tab DASHBOARD
+- Saat session restore (`fromLogin = false`): tampil home tiles tanpa redirect.
+
+---
+
+## FASE 30: CEK ABSEN — NIK Opsional untuk Non-Karyawan
+
+**Tanggal**
+2026-06-06
+
+**Kondisi awal**
+CEK ABSEN selalu memvalidasi NIK wajib diisi, sehingga SECURITY dan ADMINISTRATOR tidak bisa melihat data semua karyawan tanpa mengetik NIK satu per satu.
+
+**Akar masalah**
+- Validasi `if (!nik && !deptFilter)` di frontend dan backend tidak mempertimbangkan role.
+
+**Solusi**
+- Frontend: NIK hanya wajib untuk role KARYAWAN. SECURITY dan ADMINISTRATOR boleh kosong.
+- Backend `ReportFunctions.gs`: hapus validasi wajib nik+deptFilter — jika keduanya kosong, return semua data periode.
+- Perilaku per role:
+  - KARYAWAN: wajib isi NIK, hanya lihat data sendiri
+  - SECURITY / ADMINISTRATOR: NIK opsional, lihat semua
+  - PENGAWAS: NIK opsional, auto-filter by dept sendiri
+
+---
+
+## FASE 31: Opsi Periode Hari di CEK ABSEN
+
+**Tanggal**
+2026-06-06
+
+**Kondisi awal**
+Dropdown periode CEK ABSEN hanya punya pilihan Minggu dan Bulan. Tidak bisa filter per tanggal tertentu.
+
+**Solusi**
+- Menambahkan opsi `Hari` (value: `date`) sebagai pilihan pertama di dropdown periode CEK ABSEN.
+- Konsisten dengan CEK AREA yang sudah punya opsi Tanggal/Minggu/Bulan.
+
+---
+
 ## Langkah Lanjutan yang Masih Layak
 
 1. QA manual penuh untuk semua role live.
 2. Pertahankan disiplin update dokumentasi setiap kali ada perubahan deploy atau arsitektur.
+3. Pertimbangkan untuk menonaktifkan deployment web app child modules (GATE_PABRIK, AREA_KERJA, REPORT) agar tidak membingungkan — cukup simpan sebagai GAS project tanpa deployment aktif.

@@ -42,7 +42,8 @@ const STATE = {
   currentUser: null,
   masuk:    { selectedNIK: null, selectedNama: null, selectedType: null, selectedDept: null, selectedJabatan: null, scannedSerial: null, completed: false },
   keluar:   { scannedSerial: null, bindingData: null },
-  security: { scannedSerial: null, selectedArea: '', shiftLabel: '', storageKey: '' }
+  security: { scannedSerial: null, selectedArea: '', shiftLabel: '', storageKey: '' },
+  dashboard: { basis: 'today', dateValue: '', weekValue: '', monthValue: '', shiftValue: 'shift1', areaItems: [], selectedAreaLabel: '', deptItems: [], selectedDeptLabel: '', selectedDeptIndex: 0 }
 };
 
 function detectClientShiftLabel() {
@@ -151,7 +152,11 @@ function hydrateAuthenticatedUser(user, depts) {
   STATE.currentUser = user;
   if (Array.isArray(depts) && depts.length) STATE.availableDepts = depts;
 
-  localStorage.setItem('dam_session', JSON.stringify({ ...user, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 }));
+  localStorage.setItem('dam_session', JSON.stringify({
+    user: { ...user },
+    depts: Array.isArray(depts) ? depts : (STATE.availableDepts || []),
+    exp: Date.now() + 7 * 24 * 60 * 60 * 1000
+  }));
 
 
 
@@ -193,6 +198,7 @@ function hydrateAuthenticatedUser(user, depts) {
   }
 
   applyRolePermissions(user.role);
+  syncAreaDeptFilterOptions();
   updateMasukScannerVisibility();
 }
 
@@ -201,17 +207,36 @@ function restoreSavedSession() {
   if (!savedSession) return false;
 
   try {
-    const user = JSON.parse(savedSession);
-    if (user.exp && Date.now() > user.exp) {
+    const parsed = JSON.parse(savedSession);
+    const exp = parsed && parsed.exp;
+    const sessionUser = parsed && parsed.user ? parsed.user : parsed;
+    const sessionDepts = parsed && Array.isArray(parsed.depts) ? parsed.depts : STATE.availableDepts;
+    if (exp && Date.now() > exp) {
       localStorage.removeItem('dam_session');
       return false;
     }
-    hydrateAuthenticatedUser(user, STATE.availableDepts);
+    hydrateAuthenticatedUser(sessionUser, sessionDepts);
+    if ((!Array.isArray(sessionDepts) || !sessionDepts.length) && sessionUser && sessionUser.nik) {
+      refreshSessionCatalog(sessionUser.nik);
+    }
     return true;
   } catch (e) {
     localStorage.removeItem('dam_session');
     return false;
   }
+}
+
+function refreshSessionCatalog(nik) {
+  const targetNik = asText(nik).trim();
+  if (!targetNik) return;
+
+  google.script.run
+    .withFailureHandler(() => {})
+    .withSuccessHandler(res => {
+      if (!res || !res.ok || !res.karyawan) return;
+      hydrateAuthenticatedUser(res.karyawan, res.depts || []);
+    })
+    .verifySession(targetNik);
 }
 
 function beginModuleAutoLogin(sessionNik) {
@@ -262,7 +287,7 @@ function applyRolePermissions(role) {
 
   // Default tabs
   if (roleKey === 'ADMINISTRATOR') defaultTab = 'dashboard';
-  else if (roleKey === 'PENGAWAS') defaultTab = 'cek-absen';
+  else if (roleKey === 'PENGAWAS') defaultTab = 'security';
   else if (roleKey === 'SECURITY') defaultTab = 'security';
   else defaultTab = 'masuk';
 
@@ -275,7 +300,7 @@ function applyRolePermissions(role) {
     }
   }
 
-  const userNameEl = document.getElementById('header-user-name');
+    const userNameEl = document.getElementById('header-user-name');
   if (userNameEl && STATE.currentUser) {
     const firstName = (STATE.currentUser.nama || 'User').split(' ')[0];
     userNameEl.textContent = firstName + ' (' + roleKey + ')';
@@ -284,9 +309,13 @@ function applyRolePermissions(role) {
     if (absenNik && roleKey === 'KARYAWAN') {
       absenNik.value = STATE.currentUser.nik;
       absenNik.disabled = true;
+    } else if (absenNik) {
+      absenNik.value = '';
+      absenNik.disabled = false;
     }
     
     const masukSearch    = document.getElementById('masuk-nik-input');
+    const areaDeptSelect = document.getElementById('cek-area-dept');
     const masukBanner    = document.getElementById('masuk-assist-banner');
     const masukSearchFld = document.getElementById('masuk-search-field');
     const masukDivider   = document.getElementById('masuk-data-divider');
@@ -297,12 +326,22 @@ function applyRolePermissions(role) {
       if (masukSearchFld) masukSearchFld.style.display = 'none';
       if (masukBanner)    masukBanner.style.display = 'none';
       if (masukDivider)   masukDivider.style.display = 'none';
+      if (areaDeptSelect) {
+        areaDeptSelect.value = '';
+        areaDeptSelect.disabled = false;
+      }
     } else {
       // SECURITY / PENGAWAS / ADMINISTRATOR: search prominent, banner aktif
       if (masukSearch)    { masukSearch.disabled = false; masukSearch.placeholder = 'Ketik NIK atau nama karyawan...'; }
       if (masukSearchFld) masukSearchFld.style.display = 'block';
       if (masukBanner)    masukBanner.style.display = 'block';
       if (masukDivider)   masukDivider.style.display = 'block';
+      if (areaDeptSelect && roleKey === 'PENGAWAS') {
+        areaDeptSelect.value = STATE.currentUser.dept || '';
+        areaDeptSelect.disabled = true;
+      } else if (areaDeptSelect) {
+        areaDeptSelect.disabled = false;
+      }
     }
   }
 
@@ -777,44 +816,754 @@ function handleSecurityScan(res) {
 
 // ── DASHBOARD ──────────────────────────────────────────────
 function loadDashboard() {
-  document.getElementById('db-bound').textContent      = '...';
-  document.getElementById('db-log-today').textContent  = '...';
+  const dashboardBasis = (STATE.dashboard && STATE.dashboard.basis) || 'today';
+  const dashboardValue = getDashboardBasisValue(dashboardBasis);
+  const deptFilter = (document.getElementById('db-dept-filter') || {}).value || '';
+  const typeFilter = (document.getElementById('db-type-filter') || {}).value || '';
+
+  // Reset kehadiran data agar sub-tabs ikut refresh
+  if (STATE.dashboard) {
+    STATE.dashboard.kehadiranLoaded = false;
+    STATE.dashboard.kehadiranData   = null;
+  }
+
+  document.getElementById('db-basis-meta').textContent   = 'Memuat basis waktu dashboard...';
+  document.getElementById('db-focus-summary').innerHTML = '<strong>Memuat ringkasan operasional...</strong><span>Dashboard sedang menghitung posisi area terakhir.</span>';
+  document.getElementById('db-inside').textContent      = '...';
+  document.getElementById('db-scanned').textContent     = '...';
+  document.getElementById('db-unscanned').textContent   = '...';
+  document.getElementById('db-area-active').textContent = '...';
+  document.getElementById('db-coverage').textContent    = '...';
+  const terlambatEl = document.getElementById('db-terlambat');
+  const lemburEl    = document.getElementById('db-lembur');
+  const anomaliEl   = document.getElementById('db-anomali');
+  if (terlambatEl) terlambatEl.textContent = '...';
+  if (lemburEl)    lemburEl.textContent    = '...';
+  if (anomaliEl)   anomaliEl.textContent   = '...';
+  const shiftCovEl = document.getElementById('db-shift-coverage');
+  if (shiftCovEl) shiftCovEl.innerHTML = '<div class="loading">Memuat data shift...</div>';
+  document.getElementById('db-area-summary').innerHTML  = '<div class="skeleton-block skeleton-loader"></div>';
+  document.getElementById('db-area-detail').innerHTML   = '<div class="skeleton-block skeleton-loader"></div>';
+  document.getElementById('db-type-summary').innerHTML  = '<div class="skeleton-block skeleton-loader"></div>';
+  document.getElementById('db-dept-summary').innerHTML  = '<div class="skeleton-block skeleton-loader"></div>';
+  document.getElementById('db-dept-detail').innerHTML   = '<div class="skeleton-block skeleton-loader"></div>';
+  document.getElementById('db-kanban-board').innerHTML  = '<div class="skeleton-block skeleton-loader"></div><div class="skeleton-block skeleton-loader"></div>';
   document.getElementById('db-bound-list').innerHTML   = '<div class="skeleton-block skeleton-loader"></div><div class="skeleton-block skeleton-loader"></div>';
+  updateDashboardFilterControls();
 
   google.script.run
     .withFailureHandler(err => {
-      document.getElementById('db-bound').textContent = '-';
-      document.getElementById('db-log-today').textContent = '-';
+      document.getElementById('db-basis-meta').textContent = 'Basis waktu dashboard tidak tersedia.';
+      document.getElementById('db-focus-summary').innerHTML = '<strong>Ringkasan operasional tidak tersedia.</strong><span>Gagal mengambil data dashboard dari server.</span>';
+      document.getElementById('db-inside').textContent = '-';
+      document.getElementById('db-scanned').textContent = '-';
+      document.getElementById('db-unscanned').textContent = '-';
+      document.getElementById('db-area-active').textContent = '-';
+      document.getElementById('db-coverage').textContent = '-';
+      document.getElementById('db-area-summary').innerHTML = '<div class="loading">Ringkasan area tidak tersedia.</div>';
+      document.getElementById('db-area-detail').innerHTML = '<div class="loading">Detail area tidak tersedia.</div>';
+      document.getElementById('db-type-summary').innerHTML = '<div class="loading">Ringkasan jenis karyawan tidak tersedia.</div>';
+      document.getElementById('db-dept-summary').innerHTML = '<div class="loading">Ringkasan departemen tidak tersedia.</div>';
+      document.getElementById('db-dept-detail').innerHTML = '<div class="loading">Detail departemen tidak tersedia.</div>';
+      document.getElementById('db-kanban-board').innerHTML = '<div class="loading">Kanban area kerja tidak tersedia.</div>';
       document.getElementById('db-bound-list').innerHTML = `<div class="loading">Gagal memuat dashboard: ${escHtml(getErrorMessage(err))}</div>`;
     })
     .withSuccessHandler(res => {
       if (!res.ok) {
-        document.getElementById('db-bound').textContent = '-';
-        document.getElementById('db-log-today').textContent = '-';
+        document.getElementById('db-basis-meta').textContent = 'Basis waktu dashboard tidak tersedia.';
+        document.getElementById('db-focus-summary').innerHTML = `<strong>Ringkasan operasional tidak tersedia.</strong><span>${escHtml(res.msg || 'Gagal memproses data dashboard.')}</span>`;
+        document.getElementById('db-inside').textContent = '-';
+        document.getElementById('db-scanned').textContent = '-';
+        document.getElementById('db-unscanned').textContent = '-';
+        document.getElementById('db-area-active').textContent = '-';
+        document.getElementById('db-coverage').textContent = '-';
+        document.getElementById('db-area-summary').innerHTML = '<div class="loading">Ringkasan area tidak tersedia.</div>';
+        document.getElementById('db-area-detail').innerHTML = '<div class="loading">Detail area tidak tersedia.</div>';
+        document.getElementById('db-type-summary').innerHTML = '<div class="loading">Ringkasan jenis karyawan tidak tersedia.</div>';
+        document.getElementById('db-dept-summary').innerHTML = '<div class="loading">Ringkasan departemen tidak tersedia.</div>';
+        document.getElementById('db-dept-detail').innerHTML = '<div class="loading">Detail departemen tidak tersedia.</div>';
+        document.getElementById('db-kanban-board').innerHTML = '<div class="loading">Kanban area kerja tidak tersedia.</div>';
         document.getElementById('db-bound-list').innerHTML = `<div class="loading">Gagal memuat dashboard: ${escHtml(res.msg)}</div>`;
         return;
       }
-      document.getElementById('db-bound').textContent     = res.totalBound;
-      document.getElementById('db-log-today').textContent = res.logAreaKerjaHariIni;
+      document.getElementById('db-basis-meta').innerHTML =
+        `<strong>${escHtml(res.basisLabel || 'Hari ini')}</strong> ` +
+        `untuk periode <strong>${escHtml(res.periodLabel || '-')}</strong>. ` +
+        `Terakhir diperbarui: <strong>${escHtml(res.generatedAt || '-')}</strong>. ` +
+        `${escHtml(res.metricHint || 'Dashboard ini merangkum recap dan log area pada basis terpilih.')}`;
+      document.getElementById('db-focus-summary').innerHTML =
+        `<strong>${escHtml(res.summaryHeadline || 'Ringkasan operasional tidak tersedia.')}</strong>` +
+        `<span>${escHtml(res.summaryFootnote || 'Periksa kembali scan area untuk detail posisi orang.')}</span>`;
+      document.getElementById('db-inside').textContent      = res.totalInside ?? res.totalBound ?? 0;
+      document.getElementById('db-scanned').textContent     = res.totalScannedArea ?? 0;
+      document.getElementById('db-unscanned').textContent   = res.totalUnscannedArea ?? 0;
+      document.getElementById('db-area-active').textContent = res.totalAreaActive ?? 0;
+      document.getElementById('db-coverage').textContent    = `${res.scanCoveragePct ?? 0}%`;
+
+      const areaSummary = document.getElementById('db-area-summary');
+      const areaDetail = document.getElementById('db-area-detail');
+      const typeSummary = document.getElementById('db-type-summary');
+      const deptSummary = document.getElementById('db-dept-summary');
+      const deptDetail = document.getElementById('db-dept-detail');
+      const kanbanBoard = document.getElementById('db-kanban-board');
+      const renderAreaChart = (scanBreakdown, areaItems, emptyMessage) => {
+        if (!Array.isArray(areaItems) || !areaItems.length) {
+          return `<div class="loading">${emptyMessage}</div>`;
+        }
+        const scanCards = Array.isArray(scanBreakdown) && scanBreakdown.length
+          ? `<div class="dashboard-scan-overview">${scanBreakdown.map(item => `
+              <div class="dashboard-scan-card ${item.tone === 'unscanned' ? 'tone-unscanned' : 'tone-scanned'}">
+                <strong>${escHtml(item.label || '-')}</strong>
+                <span>${item.total || 0} orang</span>
+                <small>${item.sharePct || 0}% dari total di dalam</small>
+              </div>
+            `).join('')}</div>`
+          : '';
+        const chartRows = areaItems.map(item => {
+          const width = Math.max(6, Math.min(100, item.sharePct || 0));
+          const isSelected = item.label === STATE.dashboard.selectedAreaLabel;
+          return `
+            <button type="button" class="dashboard-chart-row ${item.isUnscanned ? 'is-unscanned' : ''} ${isSelected ? 'is-selected' : ''}" data-action="select-dashboard-area" data-area-label="${escHtml(item.label || '')}">
+              <div class="dashboard-chart-head">
+                <strong>${escHtml(item.label || '-')}</strong>
+                <span>${item.total || 0} orang · ${item.sharePct || 0}%</span>
+              </div>
+              <div class="dashboard-chart-track">
+                <div class="dashboard-chart-bar ${item.isUnscanned ? 'tone-unscanned' : 'tone-scanned'}" style="width:${width}%"></div>
+              </div>
+            </button>`;
+        }).join('');
+        return `${scanCards}<div class="dashboard-chart-block">${chartRows}</div>`;
+      };
+      const renderAreaDetail = (areaItems, selectedLabel) => {
+        if (!Array.isArray(areaItems) || !areaItems.length) {
+          return '<div class="loading">Klik salah satu area untuk melihat daftar nama dan jam masuk.</div>';
+        }
+        const selected = areaItems.find(item => item.label === selectedLabel) || areaItems[0];
+        STATE.dashboard.selectedAreaLabel = selected ? selected.label : '';
+        if (!selected) {
+          return '<div class="loading">Detail area tidak tersedia.</div>';
+        }
+        const people = Array.isArray(selected.items) ? selected.items : [];
+        if (!people.length) {
+          return `
+            <div class="dashboard-area-detail-head">
+              <strong>${escHtml(selected.label || '-')}</strong>
+              <span>${selected.total || 0} orang</span>
+            </div>
+            <div class="loading">Belum ada daftar orang untuk area ini.</div>`;
+        }
+        return `
+          <div class="dashboard-area-detail-head">
+            <strong>${escHtml(selected.label || '-')}</strong>
+            <span>${selected.total || 0} orang</span>
+          </div>
+          <div class="dashboard-area-detail-list">
+            ${people.map(person => `
+              <div class="dashboard-area-detail-item">
+                <div class="dashboard-area-detail-main">
+                  <strong>${escHtml(person.nama || '-')}</strong>
+                  <span>${escHtml(person.nik || '-')} · ${escHtml(person.dept || '-')} · ${escHtml(person.type || '-')}</span>
+                </div>
+                <div class="dashboard-area-detail-time">
+                  <label>Masuk</label>
+                  <strong>${escHtml(person.waktuBind || '-')}</strong>
+                </div>
+              </div>
+            `).join('')}
+          </div>`;
+      };
+      const renderPopulation = (items, emptyMessage, toneClass) => {
+        if (!Array.isArray(items) || !items.length) {
+          return `<div class="loading">${emptyMessage}</div>`;
+        }
+        return `<div class="dashboard-population-grid">${items.map(item => `
+          <div class="dashboard-population-pill ${toneClass}">
+            <strong>${escHtml(item.label || '-')}</strong>
+            <span>${item.total || 0} orang</span>
+          </div>`).join('')}</div>`;
+      };
+      const renderDeptPopulation = (items, emptyMessage) => {
+        if (!Array.isArray(items) || !items.length) {
+          return `<div class="loading">${emptyMessage}</div>`;
+        }
+        return `<div class="dashboard-population-grid">${items.map((item, index) => `
+          <button type="button" class="dashboard-population-pill tone-dept ${index === STATE.dashboard.selectedDeptIndex ? 'is-selected' : ''}" data-action="select-dashboard-dept" data-dept-index="${index}">
+            <strong>${escHtml(item.label || '-')}</strong>
+            <span>${item.total || 0} orang</span>
+          </button>`).join('')}</div>`;
+      };
+      const renderDeptDetail = (deptItems, selectedIndex) => {
+        if (!Array.isArray(deptItems) || !deptItems.length) {
+          return '<div class="loading">Klik box departemen untuk melihat siapa saja yang sedang di dalam.</div>';
+        }
+        const safeIndex = Math.max(0, Math.min(parseInt(selectedIndex, 10) || 0, deptItems.length - 1));
+        const selected = deptItems[safeIndex] || deptItems[0];
+        STATE.dashboard.selectedDeptIndex = safeIndex;
+        STATE.dashboard.selectedDeptLabel = selected ? selected.label : '';
+        if (!selected) {
+          return '<div class="loading">Detail departemen tidak tersedia.</div>';
+        }
+        const people = Array.isArray(selected.items) ? selected.items : [];
+        if (!people.length) {
+          return `
+            <div class="dashboard-area-detail-head">
+              <strong>${escHtml(selected.label || '-')}</strong>
+              <span>${selected.total || 0} orang</span>
+            </div>
+            <div class="loading">Belum ada daftar orang untuk departemen ini.</div>`;
+        }
+        return `
+          <div class="dashboard-area-detail-head">
+            <strong>${escHtml(selected.label || '-')}</strong>
+            <span>${selected.total || 0} orang</span>
+          </div>
+          <div class="dashboard-area-detail-list">
+            ${people.map(person => {
+              const statusLabel = person.areaLabel && person.areaLabel !== 'Belum Scan Area'
+                ? `${person.areaLabel} · ${person.jamMasukArea || '-'}`
+                : `Belum Scan Area · Masuk pabrik ${person.waktuBind || '-'}`;
+              return `
+                <div class="dashboard-area-detail-item">
+                  <div class="dashboard-area-detail-main">
+                    <strong>${escHtml(person.nama || '-')}</strong>
+                    <span>${escHtml(person.nik || '-')} · ${escHtml(person.dept || '-')} · ${escHtml(person.type || '-')}</span>
+                    <span>${escHtml(statusLabel)}</span>
+                  </div>
+                  <div class="dashboard-area-detail-time">
+                    <label>${person.areaLabel && person.areaLabel !== 'Belum Scan Area' ? 'Masuk Area' : 'Masuk Pabrik'}</label>
+                    <strong>${escHtml((person.areaLabel && person.areaLabel !== 'Belum Scan Area' ? person.jamMasukArea : person.waktuBind) || '-')}</strong>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>`;
+      };
+
+      STATE.dashboard.areaItems = Array.isArray(res.areaPopulation) ? res.areaPopulation : [];
+      if (!STATE.dashboard.selectedAreaLabel && STATE.dashboard.areaItems.length) {
+        STATE.dashboard.selectedAreaLabel = STATE.dashboard.areaItems[0].label || '';
+      }
+      areaSummary.innerHTML = renderAreaChart(res.scanBreakdown, res.areaPopulation, 'Belum ada posisi area yang aktif pada basis ini.');
+      areaDetail.innerHTML = renderAreaDetail(STATE.dashboard.areaItems, STATE.dashboard.selectedAreaLabel);
+      typeSummary.innerHTML = renderPopulation(res.typePopulation, 'Belum ada jenis karyawan yang terdeteksi.', 'tone-type');
+      STATE.dashboard.deptItems = Array.isArray(res.deptPopulation) ? res.deptPopulation : [];
+      if ((!STATE.dashboard.selectedDeptLabel && STATE.dashboard.deptItems.length) || STATE.dashboard.selectedDeptIndex >= STATE.dashboard.deptItems.length) {
+        STATE.dashboard.selectedDeptIndex = 0;
+        STATE.dashboard.selectedDeptLabel = STATE.dashboard.deptItems[0].label || '';
+      }
+      deptSummary.innerHTML = renderDeptPopulation(res.deptPopulation, 'Belum ada departemen aktif yang terdeteksi.');
+      deptDetail.innerHTML = renderDeptDetail(STATE.dashboard.deptItems, STATE.dashboard.selectedDeptIndex);
+      kanbanBoard.innerHTML = renderDashboardKanban(res.kanbanGroups);
+
+      // Render shift coverage (FASE 7)
+      if (res.shiftCoverage) {
+        const scEl = document.getElementById('db-shift-coverage');
+        if (scEl) scEl.innerHTML = renderShiftCoverage(res.shiftCoverage);
+      }
 
       const list = document.getElementById('db-bound-list');
       if (!res.boundList.length) {
-        list.innerHTML = '<div class="loading">Tidak ada karyawan di dalam pabrik</div>';
+        list.innerHTML = '<div class="loading">Tidak ada orang berstatus DI DALAM pada basis ini.</div>';
+      } else {
+        list.innerHTML = res.boundList.map(k => `
+          <div class="log-item">
+            <div class="log-dot in" style="background:#e8f4fb">
+              <span style="font-weight:800;color:#0077B6">${k.nama.charAt(0)}</span>
+            </div>
+            <div class="log-info">
+              <strong>${escHtml(k.nama)}</strong>
+              <span>${k.nik} - ${escHtml(k.dept)} - ${escHtml(k.type || 'INTERNAL')} - Kartu: ${escHtml(k.noKartuMK || '-')}</span>
+            </div>
+            <div class="log-time">${escHtml(k.waktuBind || '')}</div>
+          </div>`).join('');
+      }
+
+      // Populate dept filter options dari availableDepts
+      populateDeptFilterOptions();
+      // Muat kehadiran dashboard (untuk KPI terlambat/lembur/anomali)
+      loadKehadiranDashboard();
+    })
+    .getDashboardData(dashboardBasis, dashboardValue, deptFilter, typeFilter);
+}
+
+function selectDashboardArea(areaLabel) {
+  const selectedLabel = asText(areaLabel).trim();
+  if (!selectedLabel) return;
+  STATE.dashboard.selectedAreaLabel = selectedLabel;
+  const target = document.getElementById('db-area-detail');
+  if (!target) return;
+  const areaItems = Array.isArray(STATE.dashboard.areaItems) ? STATE.dashboard.areaItems : [];
+  const selected = areaItems.find(item => item.label === selectedLabel);
+  if (!selected) {
+    target.innerHTML = '<div class="loading">Detail area tidak tersedia.</div>';
+    return;
+  }
+  target.innerHTML = `
+    <div class="dashboard-area-detail-head">
+      <strong>${escHtml(selected.label || '-')}</strong>
+      <span>${selected.total || 0} orang</span>
+    </div>
+    <div class="dashboard-area-detail-list">
+      ${(selected.items || []).map(person => `
+        <div class="dashboard-area-detail-item">
+          <div class="dashboard-area-detail-main">
+            <strong>${escHtml(person.nama || '-')}</strong>
+            <span>${escHtml(person.nik || '-')} · ${escHtml(person.dept || '-')} · ${escHtml(person.type || '-')}</span>
+          </div>
+          <div class="dashboard-area-detail-time">
+            <label>Masuk</label>
+            <strong>${escHtml(person.waktuBind || '-')}</strong>
+          </div>
+        </div>
+      `).join('') || '<div class="loading">Belum ada daftar orang untuk area ini.</div>'}
+    </div>`;
+}
+
+function renderSelectedDeptPanel() {
+  const target = document.getElementById('db-dept-detail');
+  const summary = document.getElementById('db-dept-summary');
+  const deptItems = Array.isArray(STATE.dashboard.deptItems) ? STATE.dashboard.deptItems : [];
+  if (!target || !summary || !deptItems.length) return;
+  const safeIndex = Math.max(0, Math.min(parseInt(STATE.dashboard.selectedDeptIndex, 10) || 0, deptItems.length - 1));
+  const selected = deptItems[safeIndex];
+  if (!selected) {
+    target.innerHTML = '<div class="loading">Detail departemen tidak tersedia.</div>';
+    return;
+  }
+  STATE.dashboard.selectedDeptIndex = safeIndex;
+  STATE.dashboard.selectedDeptLabel = selected.label || '';
+  summary.innerHTML = `<div class="dashboard-population-grid">${deptItems.map((item, index) => `
+    <button type="button" class="dashboard-population-pill tone-dept ${index === safeIndex ? 'is-selected' : ''}" data-action="select-dashboard-dept" data-dept-index="${index}">
+      <strong>${escHtml(item.label || '-')}</strong>
+      <span>${item.total || 0} orang</span>
+    </button>`).join('')}</div>`;
+  target.innerHTML = `
+    <div class="dashboard-area-detail-head">
+      <strong>${escHtml(selected.label || '-')}</strong>
+      <span>${selected.total || 0} orang</span>
+    </div>
+    <div class="dashboard-area-detail-list">
+      ${(selected.items || []).map(person => {
+        const statusLabel = person.areaLabel && person.areaLabel !== 'Belum Scan Area'
+          ? `${person.areaLabel} · ${person.jamMasukArea || '-'}`
+          : `Belum Scan Area · Masuk pabrik ${person.waktuBind || '-'}`;
+        return `
+          <div class="dashboard-area-detail-item">
+            <div class="dashboard-area-detail-main">
+              <strong>${escHtml(person.nama || '-')}</strong>
+              <span>${escHtml(person.nik || '-')} · ${escHtml(person.dept || '-')} · ${escHtml(person.type || '-')}</span>
+              <span>${escHtml(statusLabel)}</span>
+            </div>
+            <div class="dashboard-area-detail-time">
+              <label>${person.areaLabel && person.areaLabel !== 'Belum Scan Area' ? 'Masuk Area' : 'Masuk Pabrik'}</label>
+              <strong>${escHtml((person.areaLabel && person.areaLabel !== 'Belum Scan Area' ? person.jamMasukArea : person.waktuBind) || '-')}</strong>
+            </div>
+          </div>`;
+      }).join('') || '<div class="loading">Belum ada daftar orang untuk departemen ini.</div>'}
+    </div>`;
+}
+
+function selectDashboardDept(deptIndex) {
+  const index = parseInt(deptIndex, 10);
+  if (isNaN(index)) return;
+  STATE.dashboard.selectedDeptIndex = index;
+  renderSelectedDeptPanel();
+}
+
+function setDashboardBasis(basis) {
+  STATE.dashboard.basis = basis || 'today';
+  updateDashboardFilterControls();
+}
+
+function applyDashboardFilter() {
+  loadDashboard();
+}
+
+function getDashboardBasisValue(basis) {
+  const mode = basis || 'today';
+  if (mode === 'shift') {
+    return document.getElementById('db-shift-value')?.value || STATE.dashboard.shiftValue || 'shift1';
+  }
+  if (mode === 'date') {
+    return document.getElementById('db-date-value')?.value || STATE.dashboard.dateValue || getDefaultPeriodValue('date');
+  }
+  if (mode === 'week') {
+    return document.getElementById('db-week-value')?.value || STATE.dashboard.weekValue || getDefaultPeriodValue('week');
+  }
+  if (mode === 'month') {
+    return document.getElementById('db-month-value')?.value || STATE.dashboard.monthValue || getDefaultPeriodValue('month');
+  }
+  return '';
+}
+
+function updateDashboardFilterControls() {
+  const basis = (STATE.dashboard && STATE.dashboard.basis) || 'today';
+  const basisMode = document.getElementById('db-basis-mode');
+  const shiftField = document.getElementById('db-shift-field');
+  const dateField = document.getElementById('db-date-field');
+  const weekField = document.getElementById('db-week-field');
+  const monthField = document.getElementById('db-month-field');
+  const shiftInput = document.getElementById('db-shift-value');
+  const dateInput = document.getElementById('db-date-value');
+  const weekInput = document.getElementById('db-week-value');
+  const monthInput = document.getElementById('db-month-value');
+  if (basisMode) basisMode.value = basis;
+  if (shiftInput && !shiftInput.value) shiftInput.value = STATE.dashboard.shiftValue || 'shift1';
+  if (dateInput && !dateInput.value) dateInput.value = STATE.dashboard.dateValue || getDefaultPeriodValue('date');
+  if (weekInput && !weekInput.value) weekInput.value = STATE.dashboard.weekValue || getDefaultPeriodValue('week');
+  if (monthInput && !monthInput.value) monthInput.value = STATE.dashboard.monthValue || getDefaultPeriodValue('month');
+  if (shiftField) shiftField.style.display = basis === 'shift' ? 'block' : 'none';
+  if (dateField) dateField.style.display = (basis === 'date' || basis === 'shift') ? 'block' : 'none';
+  if (weekField) weekField.style.display = basis === 'week' ? 'block' : 'none';
+  if (monthField) monthField.style.display = basis === 'month' ? 'block' : 'none';
+}
+
+function handleDashboardFilterInput() {
+  const basisMode = document.getElementById('db-basis-mode');
+  const shiftInput = document.getElementById('db-shift-value');
+  const dateInput = document.getElementById('db-date-value');
+  const weekInput = document.getElementById('db-week-value');
+  const monthInput = document.getElementById('db-month-value');
+  if (basisMode) STATE.dashboard.basis = basisMode.value || 'today';
+  if (shiftInput) STATE.dashboard.shiftValue = shiftInput.value || 'shift1';
+  if (dateInput) STATE.dashboard.dateValue = dateInput.value || getDefaultPeriodValue('date');
+  if (weekInput) STATE.dashboard.weekValue = weekInput.value || getDefaultPeriodValue('week');
+  if (monthInput) STATE.dashboard.monthValue = monthInput.value || getDefaultPeriodValue('month');
+  updateDashboardFilterControls();
+}
+
+function renderDashboardKanban(groups) {
+  if (!Array.isArray(groups) || !groups.length) {
+    return '<div class="loading">Belum ada kartu kanban yang aktif.</div>';
+  }
+  return `<div class="dashboard-kanban">${groups.map(group => `
+    <div class="kanban-column">
+      <div class="kanban-column-head">
+        <strong>${escHtml(group.label || '-')}</strong>
+        <span>${group.total || 0} orang</span>
+      </div>
+      <div class="kanban-cards">
+        ${(group.items || []).map(item => `
+          <div class="kanban-card">
+            <strong>${escHtml(item.nama || '-')}</strong>
+            <span>${escHtml(item.nik || '-')} · ${escHtml(item.dept || '-')}</span>
+            <span>${escHtml(item.type || '-')} · ${escHtml(item.waktuBind || '-')}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('')}</div>`;
+}
+
+// ── DASHBOARD SUB-TABS ─────────────────────────────────────
+
+function switchDashboardSubtab(subtab) {
+  document.querySelectorAll('.db-section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
+  const section = document.getElementById('db-section-' + subtab);
+  const btn     = document.getElementById('db-sub-' + subtab);
+  if (section) section.classList.add('active');
+  if (btn)     btn.classList.add('active');
+  // Lazy-load kehadiran data saat pertama kali masuk sub-tab non-operasional
+  if (subtab !== 'operasional' && STATE.dashboard && !STATE.dashboard.kehadiranLoaded) {
+    loadKehadiranDashboard();
+  }
+}
+
+function populateDeptFilterOptions() {
+  const sel = document.getElementById('db-dept-filter');
+  if (!sel) return;
+  const depts = Array.isArray(STATE.availableDepts) ? STATE.availableDepts : [];
+  const currentVal = sel.value;
+  sel.innerHTML = '<option value="">Semua Dept</option>' +
+    depts.map(d => `<option value="${escHtml(d)}"${d === currentVal ? ' selected' : ''}>${escHtml(d)}</option>`).join('');
+}
+
+// ── KEHADIRAN DASHBOARD ─────────────────────────────────────
+
+function loadKehadiranDashboard() {
+  if (!STATE.dashboard) return;
+  // Tentukan tanggal: pakai db-date-value jika basis=date, atau hari ini
+  let tanggal = '';
+  const basis = STATE.dashboard.basis || 'today';
+  if (basis === 'date') {
+    tanggal = (document.getElementById('db-date-value') || {}).value || '';
+  }
+  const shiftFilter = (document.getElementById('db-shift-value') || {}).value || '';
+  const deptFilter  = (document.getElementById('db-dept-filter') || {}).value || '';
+  const typeFilter  = (document.getElementById('db-type-filter') || {}).value || '';
+
+  // Set loading states di semua 3 sub-tabs
+  ['db-kehadiran-summary','db-kehadiran-kanban',
+   'db-terlambat-summary','db-terlambat-kanban',
+   'db-lembur-summary','db-lembur-kanban'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '<div class="loading">Memuat...</div>';
+  });
+
+  google.script.run
+    .withFailureHandler(err => {
+      const msg = escHtml(getErrorMessage(err));
+      ['db-kehadiran-kanban','db-terlambat-kanban','db-lembur-kanban'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = `<div class="loading">Gagal memuat: ${msg}</div>`;
+      });
+    })
+    .withSuccessHandler(res => {
+      if (!res || !res.ok) {
+        const msg = escHtml((res && res.msg) || 'Gagal memuat data kehadiran.');
+        ['db-kehadiran-kanban','db-terlambat-kanban','db-lembur-kanban'].forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.innerHTML = `<div class="loading">${msg}</div>`;
+        });
         return;
       }
-      list.innerHTML = res.boundList.map(k => `
-        <div class="log-item">
-          <div class="log-dot in" style="background:#e8f4fb">
-            <span style="font-weight:800;color:#0077B6">${k.nama.charAt(0)}</span>
-          </div>
-          <div class="log-info">
-            <strong>${escHtml(k.nama)}</strong>
-            <span>${k.nik} - ${escHtml(k.dept)} - Kartu: ${k.noKartuMK}</span>
-          </div>
-          <div class="log-time">${k.waktuBind ? k.waktuBind.split(' ')[1] || '' : ''}</div>
-        </div>`).join('');
+      STATE.dashboard.kehadiranData   = res;
+      STATE.dashboard.kehadiranLoaded = true;
+
+      // Update KPI cards di stat-grid
+      updateKehadiranKPI(res.summary);
+
+      // Render kanban kehadiran
+      const kehEl = document.getElementById('db-kehadiran-kanban');
+      const kehSumEl = document.getElementById('db-kehadiran-summary');
+      if (kehEl)    kehEl.innerHTML    = renderKehadiranKanban(res.kehadiranList);
+      if (kehSumEl) kehSumEl.innerHTML = renderKehadiranSummary(res.summary);
+
+      // Render kanban keterlambatan
+      const trlEl    = document.getElementById('db-terlambat-kanban');
+      const trlSumEl = document.getElementById('db-terlambat-summary');
+      if (trlEl)    trlEl.innerHTML    = renderKeterlambatanKanban(res.kehadiranList);
+      if (trlSumEl) trlSumEl.innerHTML = renderKeterlambatanSummary(res.summary);
+
+      // Render kanban lembur
+      const lmbEl    = document.getElementById('db-lembur-kanban');
+      const lmbSumEl = document.getElementById('db-lembur-summary');
+      if (lmbEl)    lmbEl.innerHTML    = renderLemburKanban(res.kehadiranList);
+      if (lmbSumEl) lmbSumEl.innerHTML = renderLemburSummary(res.summary);
     })
-    .getDashboardData();
+    .getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter);
+}
+
+function updateKehadiranKPI(summary) {
+  if (!summary) return;
+  const terlambat = (summary.totalTerlambat || {});
+  const total = (terlambat.ringan || 0) + (terlambat.sedang || 0) + (terlambat.berat || 0);
+  const tEl = document.getElementById('db-terlambat');
+  const lEl = document.getElementById('db-lembur');
+  const aEl = document.getElementById('db-anomali');
+  if (tEl) tEl.textContent = total;
+  if (lEl) lEl.textContent = summary.totalLembur || 0;
+  if (aEl) aEl.textContent = summary.totalAnomali || 0;
+}
+
+// ── RENDER: SHIFT COVERAGE ─────────────────────────────────
+
+function renderShiftCoverage(shiftCoverage) {
+  if (!Array.isArray(shiftCoverage) || !shiftCoverage.length) {
+    return '<div class="loading">Data shift belum tersedia.</div>';
+  }
+  return `<div class="shift-coverage-grid">${shiftCoverage.map(s => `
+    <div class="shift-coverage-col">
+      <div class="shift-label">${escHtml(s.label)}</div>
+      <div class="shift-stat"><span>Hadir</span><strong>${s.hadir || 0} orang</strong></div>
+      <div class="shift-stat warn"><span>Terlambat</span><strong>${s.terlambat || 0}</strong></div>
+      <div class="shift-stat info"><span>Lembur</span><strong>${s.lembur || 0}</strong></div>
+    </div>`).join('')}</div>`;
+}
+
+// ── RENDER: KEHADIRAN KANBAN ────────────────────────────────
+
+function renderKehadiranSummary(summary) {
+  if (!summary) return '';
+  const t = summary.totalTerlambat || {};
+  return `<div class="kehadiran-summary-bar">
+    <span class="keh-chip belum">Belum Masuk: ${summary.totalBelumMasuk || 0}</span>
+    <span class="keh-chip dalam">Di Dalam: ${(summary.totalHadir || 0) - (summary.totalSudahPulang || 0) - (summary.totalAnomali || 0)}</span>
+    <span class="keh-chip pulang">Sudah Pulang: ${summary.totalSudahPulang || 0}</span>
+    <span class="keh-chip anomali">Anomali: ${summary.totalAnomali || 0}</span>
+  </div>`;
+}
+
+function renderKehadiranKanban(kehadiranList) {
+  const COLS = [
+    { key: 'belum_masuk', label: 'BELUM MASUK',  cls: 'col-belum'  },
+    { key: 'di_dalam',    label: 'DI DALAM',      cls: 'col-dalam'  },
+    { key: 'sudah_pulang',label: 'SUDAH PULANG',  cls: 'col-pulang' },
+    { key: 'anomali',     label: 'ANOMALI',        cls: 'col-anomali'}
+  ];
+  const grouped = {};
+  COLS.forEach(c => { grouped[c.key] = []; });
+  (kehadiranList || []).forEach(item => {
+    const key = item.presenceStatus || 'belum_masuk';
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(item);
+  });
+
+  return `<div class="dashboard-kanban">${COLS.map(col => {
+    const items = grouped[col.key] || [];
+    return `<div class="kanban-column ${col.cls}">
+      <div class="kanban-column-head">
+        <strong>${col.label}</strong>
+        <span>${items.length} orang</span>
+      </div>
+      <div class="kanban-cards">
+        ${items.length === 0
+          ? '<div class="loading" style="font-size:12px;padding:8px">Kosong</div>'
+          : items.map(item => renderKehadiranCard(item)).join('')}
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function renderKehadiranCard(item) {
+  const statusCls = {
+    belum_masuk: 'status-belum', di_dalam: 'status-dalam',
+    sudah_pulang: 'status-pulang', anomali: 'status-anomali'
+  }[item.presenceStatus] || 'status-belum';
+
+  const shiftBadge = item.shift ? `<span class="badge-shift">${escHtml(item.shift)}</span>` : '';
+  const jamMasukStr  = item.jamMasuk  ? `Masuk: ${item.jamMasuk}`  : 'Belum masuk';
+  const jamKeluarStr = item.jamKeluar ? ` · Keluar: ${item.jamKeluar}` : '';
+  const lateStr = item.lateMinutes > 0
+    ? `<span style="color:#e65100">Terlambat ${item.lateMinutes} mnt</span>`
+    : (item.lateMinutes !== null && item.lateMinutes <= 0 ? '<span style="color:#2d7a4a">On time</span>' : '');
+  const anomaliStr = (item.anomali || []).map(a =>
+    `<span style="color:#b71c1c">${escHtml(a)}</span>`).join(' · ');
+
+  return `<div class="kanban-card ${statusCls}" onclick="this.classList.toggle('expanded')">
+    <strong>${escHtml(item.nama || '-')}${shiftBadge}</strong>
+    <span>${escHtml(item.nik || '-')} · ${escHtml(item.dept || '-')}</span>
+    <span>${escHtml(item.type || '-')}</span>
+    <div class="kanban-card-detail">
+      <span>${jamMasukStr}${jamKeluarStr}</span>
+      ${lateStr ? `<span>${lateStr}</span>` : ''}
+      ${item.overtimeMinutes > 0 ? `<span style="color:#283593">Lembur ${item.overtimeMinutes} mnt</span>` : ''}
+      ${anomaliStr ? `<span>${anomaliStr}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+// ── RENDER: KETERLAMBATAN KANBAN ────────────────────────────
+
+function renderKeterlambatanSummary(summary) {
+  if (!summary) return '';
+  const t = summary.totalTerlambat || {};
+  return `<div class="kehadiran-summary-bar">
+    <span class="keh-chip ontime">On Time: ${summary.totalOnTime || 0}</span>
+    <span class="keh-chip ringan">Ringan (&lt;15 mnt): ${t.ringan || 0}</span>
+    <span class="keh-chip sedang">Sedang (15-29 mnt): ${t.sedang || 0}</span>
+    <span class="keh-chip berat">Berat (&ge;30 mnt): ${t.berat || 0}</span>
+  </div>`;
+}
+
+function renderKeterlambatanKanban(kehadiranList) {
+  const COLS = [
+    { key: 'ontime', label: 'ON TIME',      cls: 'col-ontime', minMnt: null, maxMnt: 0  },
+    { key: 'ringan', label: '< 15 MENIT',   cls: 'col-ringan', minMnt: 1,    maxMnt: 14 },
+    { key: 'sedang', label: '15 – 29 MENIT',cls: 'col-sedang', minMnt: 15,   maxMnt: 29 },
+    { key: 'berat',  label: '≥ 30 MENIT',   cls: 'col-berat',  minMnt: 30,   maxMnt: null}
+  ];
+  // Hanya yang sudah masuk
+  const hadir = (kehadiranList || []).filter(i => i.presenceStatus !== 'belum_masuk' && i.jamMasuk);
+  const grouped = { ontime: [], ringan: [], sedang: [], berat: [] };
+  hadir.forEach(item => {
+    const cat = item.lateCategory || 'ontime';
+    if (grouped[cat]) grouped[cat].push(item);
+  });
+  // Sort: terlambat terbanyak di atas
+  ['ringan','sedang','berat'].forEach(k => {
+    grouped[k].sort((a,b) => (b.lateMinutes||0) - (a.lateMinutes||0));
+  });
+
+  return `<div class="dashboard-kanban">${COLS.map(col => {
+    const items = grouped[col.key] || [];
+    return `<div class="kanban-column ${col.cls}">
+      <div class="kanban-column-head">
+        <strong>${col.label}</strong>
+        <span>${items.length} orang</span>
+      </div>
+      <div class="kanban-cards">
+        ${items.length === 0
+          ? '<div class="loading" style="font-size:12px;padding:8px">Kosong</div>'
+          : items.map(item => {
+              const lateStr = item.lateMinutes > 0 ? `+${item.lateMinutes} mnt` : 'On time';
+              const shiftBadge = item.shift ? `<span class="badge-shift">${escHtml(item.shift)}</span>` : '';
+              return `<div class="kanban-card status-${col.key}" onclick="this.classList.toggle('expanded')">
+                <strong>${escHtml(item.nama || '-')}${shiftBadge}</strong>
+                <span>${escHtml(item.dept || '-')} · ${escHtml(item.type || '-')}</span>
+                <span>Masuk: ${item.jamMasuk || '-'}</span>
+                <div class="kanban-card-detail">
+                  <span style="font-weight:700">${lateStr}</span>
+                  <span>NIK: ${escHtml(item.nik || '-')}</span>
+                  <span>Jabatan: ${escHtml(item.jabatan || '-')}</span>
+                </div>
+              </div>`;
+            }).join('')}
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+// ── RENDER: LEMBUR KANBAN ───────────────────────────────────
+
+function renderLemburSummary(summary) {
+  if (!summary) return '';
+  return `<div class="kehadiran-summary-bar">
+    <span class="keh-chip lembur">Total Lembur: ${summary.totalLembur || 0} orang</span>
+  </div>`;
+}
+
+function renderLemburKanban(kehadiranList) {
+  const hadir = (kehadiranList || []).filter(i => i.overtimeMinutes > 0);
+  hadir.sort((a,b) => (b.overtimeMinutes||0) - (a.overtimeMinutes||0));
+
+  const COLS = [
+    { key: 'lembur1', label: '< 1 JAM',  min: 1,   max: 59   },
+    { key: 'lembur2', label: '1 – 2 JAM',min: 60,  max: 119  },
+    { key: 'lembur3', label: '> 2 JAM',  min: 120, max: 99999}
+  ];
+  const grouped = { lembur1: [], lembur2: [], lembur3: [] };
+  hadir.forEach(item => {
+    const m = item.overtimeMinutes || 0;
+    if (m < 60)       grouped.lembur1.push(item);
+    else if (m < 120) grouped.lembur2.push(item);
+    else              grouped.lembur3.push(item);
+  });
+
+  if (!hadir.length) {
+    return '<div class="loading">Tidak ada lembur pada basis ini.</div>';
+  }
+
+  return `<div class="dashboard-kanban">${COLS.map(col => {
+    const items = grouped[col.key] || [];
+    return `<div class="kanban-column">
+      <div class="kanban-column-head">
+        <strong>${col.label}</strong>
+        <span>${items.length} orang</span>
+      </div>
+      <div class="kanban-cards">
+        ${items.length === 0
+          ? '<div class="loading" style="font-size:12px;padding:8px">Kosong</div>'
+          : items.map(item => {
+              const h = Math.floor(item.overtimeMinutes/60);
+              const m = item.overtimeMinutes%60;
+              const durStr = h > 0 ? `${h}j ${m > 0 ? m + 'm' : ''}`.trim() : `${m}m`;
+              const shiftBadge = item.shift ? `<span class="badge-shift">${escHtml(item.shift)}</span>` : '';
+              return `<div class="kanban-card status-${col.key}" onclick="this.classList.toggle('expanded')">
+                <strong>${escHtml(item.nama || '-')}${shiftBadge}</strong>
+                <span>${escHtml(item.dept || '-')} · ${escHtml(item.type || '-')}</span>
+                <span>Lembur: <strong>${durStr}</strong></span>
+                <div class="kanban-card-detail">
+                  <span>Jam Keluar: ${item.jamKeluar || '-'}</span>
+                  <span>NIK: ${escHtml(item.nik || '-')}</span>
+                  <span>Jabatan: ${escHtml(item.jabatan || '-')}</span>
+                </div>
+              </div>`;
+            }).join('')}
+      </div>
+    </div>`;
+  }).join('')}</div>`;
 }
 
 // ── RECENT LOGS ────────────────────────────────────────────
@@ -1044,12 +1793,13 @@ function downloadTextFile(filename, content, mimeType) {
 
 function processAreaReport() {
   const nik = normalizeSerial(document.getElementById('cek-area-nik').value);
+  const deptSelect = document.getElementById('cek-area-dept');
   const periodType = document.getElementById('cek-area-period-type').value;
   const periodValue = document.getElementById('cek-area-period-value').value;
   const list = document.getElementById('cek-area-list');
 
   const role = STATE.currentUser ? STATE.currentUser.role : '';
-  const deptFilter = role === 'PENGAWAS' ? STATE.currentUser.dept : '';
+  const deptFilter = role === 'PENGAWAS' ? (STATE.currentUser.dept || '') : ((deptSelect && deptSelect.value) || '');
 
   const isKaryawanArea = !STATE.currentUser || role === 'KARYAWAN';
   if (isKaryawanArea && !nik) { showResult('cek-area', 'error', 'Masukkan NIK terlebih dahulu.'); return; }
@@ -1065,6 +1815,28 @@ function processAreaReport() {
     })
     .withSuccessHandler(renderAreaReport)
     .getAreaActivityReport(nik, deptFilter, periodType, periodValue);
+}
+
+function syncAreaDeptFilterOptions() {
+  const select = document.getElementById('cek-area-dept');
+  if (!select) return;
+
+  const currentValue = select.value || '';
+  const options = ['<option value="">Semua Departemen</option>'];
+  (STATE.availableDepts || []).forEach(dept => {
+    options.push(`<option value="${escHtml(dept)}">${escHtml(dept)}</option>`);
+  });
+  select.innerHTML = options.join('');
+
+  const role = STATE.currentUser ? STATE.currentUser.role : '';
+  if (role === 'PENGAWAS' && STATE.currentUser && STATE.currentUser.dept) {
+    select.value = STATE.currentUser.dept;
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
+  select.value = currentValue && (STATE.availableDepts || []).includes(currentValue) ? currentValue : '';
 }
 
 function renderAreaReport(res) {
@@ -2046,6 +2818,10 @@ function bindUiEvents() {
     if (action === 'reset-serial') resetSerialInput(context);
 
     if (action === 'set-security-area') saveSecurityAreaShift();
+    if (action === 'apply-dashboard-filter') applyDashboardFilter();
+    if (action === 'switch-dashboard-subtab') switchDashboardSubtab(control.dataset.subtab);
+    if (action === 'select-dashboard-area') selectDashboardArea(control.dataset.areaLabel);
+    if (action === 'select-dashboard-dept') selectDashboardDept(control.dataset.deptIndex);
     if (action === 'submit-serial') submitSerial(context);
     if (action === 'confirm-masuk') confirmMasuk();
     if (action === 'confirm-keluar') confirmKeluar();
@@ -2063,6 +2839,11 @@ function bindUiEvents() {
   document.addEventListener('change', event => {
     if (event.target.dataset.action !== 'period-type') return;
     updatePeriodInput(event.target.dataset.target);
+  });
+
+  ['db-basis-mode', 'db-shift-value', 'db-date-value', 'db-week-value', 'db-month-value'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', handleDashboardFilterInput);
   });
 
   document.addEventListener('keydown', event => {
@@ -2115,7 +2896,15 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   STATE.keluar = { scannedSerial:null, bindingData:null };
   STATE.security = { scannedSerial:null, selectedArea:'', shiftLabel:'', storageKey:'' };
+  STATE.dashboard = {
+    basis: 'today',
+    dateValue: getDefaultPeriodValue('date'),
+    weekValue: getDefaultPeriodValue('week'),
+    monthValue: getDefaultPeriodValue('month'),
+    shiftValue: 'shift1'
+  };
   STATE.authBootPending = false;
+  updateDashboardFilterControls();
 
   // HOME_PORTAL adalah origin login — tidak ada auto-login dari URL param
   // Cek localStorage dulu, tampil login hanya kalau benar-benar tidak ada session

@@ -485,6 +485,68 @@ Dropdown periode CEK ABSEN hanya punya pilihan Minggu dan Bulan. Tidak bisa filt
 
 ---
 
+## FASE 32: Dashboard Populasi Area dan Jenis Karyawan
+
+**Tanggal**
+2026-06-06
+
+**Kondisi awal**
+Dashboard masih terlalu global: hanya menampilkan jumlah orang di dalam pabrik dan scan area hari ini, tetapi belum memberi gambaran cepat populasi karyawan per area kerja dan per jenis karyawan.
+
+**Akar masalah**
+- Basis dashboard masih berorientasi daftar binding / list mentah.
+- Tidak ada turunan status area terakhir per karyawan untuk menghitung populasi area aktif.
+- Komposisi jenis karyawan belum dirangkum menjadi angka operasional.
+
+**Solusi**
+- Mengubah basis populasi dashboard ke recap `ABSEN IN OUT MK` dengan status `DI DALAM`.
+- Menambahkan ringkasan populasi `per area kerja` dari status scan area terakhir pada hari yang sama.
+- Menambahkan ringkasan populasi `per jenis karyawan`.
+- Tetap mempertahankan daftar detail karyawan yang sedang berada di dalam pabrik.
+
+---
+
+## FASE 33: Dashboard Operasional yang Lebih Tegas
+
+**Tanggal**
+2026-06-06
+
+**Kondisi awal**
+Dashboard menampilkan terlalu banyak metrik campuran di bagian atas. Secara visual angkanya benar, tetapi pesan utamanya bias: user sulit menangkap apakah dashboard ini sedang menjelaskan orang di dalam pabrik, scan area, atau komposisi data.
+
+**Akar masalah**
+- Kartu utama mencampur `status operasional` dengan `komposisi departemen / jenis`.
+- Tidak ada ringkasan satu kalimat yang menjelaskan kondisi lapangan.
+- Informasi komposisi berada di level yang sama dengan informasi inti, sehingga fokus user terpecah.
+
+**Solusi**
+- Menata ulang kartu utama menjadi 5 metrik operasional: `Sedang Di Dalam`, `Sudah Scan Area`, `Belum Scan Area`, `Area Terisi`, dan `Cakupan Scan Area`.
+- Menambahkan panel ringkasan operasional singkat agar dashboard langsung menjawab kondisi lapangan.
+- Menurunkan `Jenis Karyawan` dan `Departemen` menjadi section komposisi pendukung, bukan metrik utama.
+- Memperjelas judul section area dan kanban agar lebih mudah dibaca user operasional.
+
+---
+
+## FASE 34: Area Dashboard Clickable ke Daftar Nama
+
+**Tanggal**
+2026-06-06
+
+**Kondisi awal**
+Chart area baru sudah membantu melihat distribusi scan area, tetapi operator masih harus turun ke kanban untuk mencari nama orang dan jam masuk. Informasi area dan daftar orang belum terhubung langsung.
+
+**Akar masalah**
+- Bar area hanya menampilkan agregat jumlah orang.
+- Detail siapa yang berada di area tersebut belum bisa dibuka langsung dari chart.
+- Jam masuk masih tersebar di daftar lain, sehingga alur baca operator terputus.
+
+**Solusi**
+- Menjadikan setiap row area di dashboard sebagai elemen clickable.
+- Menambahkan panel detail area yang menampilkan daftar nama, NIK, departemen, jenis karyawan, dan jam masuk.
+- Menyambungkan detail area langsung dari payload dashboard yang sama agar tidak menambah query server tambahan.
+
+---
+
 ## Langkah Lanjutan yang Masih Layak
 
 1. QA manual penuh untuk semua role live.

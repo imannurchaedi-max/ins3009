@@ -238,20 +238,186 @@
 
 <!-- PAGE: DASHBOARD -->
 <div id="page-dashboard" class="page">
+
+  <!-- ── Filter Bar ─────────────────────────────────────── -->
+  <div class="card dashboard-meta-card">
+    <div class="card-title">Filter Dashboard</div>
+    <div class="dashboard-filter-controls">
+      <div class="field">
+        <label>Basis</label>
+        <select id="db-basis-mode">
+          <option value="today">Hari Ini</option>
+          <option value="date">Tanggal</option>
+          <option value="shift">Shift</option>
+          <option value="week">Minggu</option>
+          <option value="month">Bulan</option>
+        </select>
+      </div>
+      <div class="field" id="db-shift-field" style="display:none;">
+        <label>Shift</label>
+        <select id="db-shift-value">
+          <option value="shift1">Shift 1 (06:01 - 14:00)</option>
+          <option value="shift2">Shift 2 (14:01 - 22:00)</option>
+          <option value="shift3">Shift 3 (22:01 - 06:00)</option>
+        </select>
+      </div>
+      <div class="field" id="db-date-field" style="display:none;">
+        <label>Tanggal Kerja</label>
+        <input type="date" id="db-date-value">
+      </div>
+      <div class="field" id="db-week-field" style="display:none;">
+        <label>Minggu Keberapa</label>
+        <input type="week" id="db-week-value">
+      </div>
+      <div class="field" id="db-month-field" style="display:none;">
+        <label>Bulan Apa</label>
+        <input type="month" id="db-month-value">
+      </div>
+    </div>
+    <div class="dashboard-filter-controls dashboard-filter-row2">
+      <div class="field">
+        <label>Departemen</label>
+        <select id="db-dept-filter">
+          <option value="">Semua Dept</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Tipe Karyawan</label>
+        <select id="db-type-filter">
+          <option value="">Semua</option>
+          <option value="internal">Internal</option>
+          <option value="outsource">Outsource / Mitra</option>
+        </select>
+      </div>
+      <div class="field dashboard-apply-field">
+        <label>&nbsp;</label>
+        <button class="btn btn-primary" type="button" data-action="apply-dashboard-filter">Terapkan</button>
+      </div>
+    </div>
+    <div id="db-basis-meta" class="dashboard-meta-text">Memuat basis waktu dashboard...</div>
+    <div id="db-focus-summary" class="dashboard-focus-summary">
+      <strong>Memuat ringkasan operasional...</strong>
+      <span>Dashboard akan merangkum siapa yang sudah punya posisi area dan siapa yang belum.</span>
+    </div>
+  </div>
+
+  <!-- ── KPI Grid ───────────────────────────────────────── -->
   <div class="stat-grid">
     <div class="stat-box">
-      <div class="num" id="db-bound">-</div>
-      <div class="lbl">DI DALAM PABRIK</div>
+      <div class="num" id="db-inside">-</div>
+      <div class="lbl">SEDANG DI DALAM</div>
     </div>
     <div class="stat-box">
-      <div class="num" id="db-log-today">-</div>
-      <div class="lbl">SCAN AREA HARI INI</div>
+      <div class="num" id="db-scanned">-</div>
+      <div class="lbl">SUDAH SCAN AREA</div>
+    </div>
+    <div class="stat-box">
+      <div class="num" id="db-unscanned">-</div>
+      <div class="lbl">BELUM SCAN AREA</div>
+    </div>
+    <div class="stat-box">
+      <div class="num" id="db-area-active">-</div>
+      <div class="lbl">AREA TERISI</div>
+    </div>
+    <div class="stat-box">
+      <div class="num" id="db-coverage">-</div>
+      <div class="lbl">CAKUPAN SCAN AREA</div>
+    </div>
+    <div class="stat-box stat-box-warn">
+      <div class="num" id="db-terlambat">-</div>
+      <div class="lbl">TERLAMBAT</div>
+    </div>
+    <div class="stat-box stat-box-info">
+      <div class="num" id="db-lembur">-</div>
+      <div class="lbl">LEMBUR</div>
+    </div>
+    <div class="stat-box stat-box-danger">
+      <div class="num" id="db-anomali">-</div>
+      <div class="lbl">ANOMALI</div>
     </div>
   </div>
-  <div class="card">
-    <div class="card-title">Karyawan Di Dalam Pabrik</div>
-    <div id="db-bound-list"><div class="loading">Memuat data...</div></div>
+
+  <!-- ── Sub-tab Bar ────────────────────────────────────── -->
+  <div id="db-subtab-bar" class="subtab-bar">
+    <button id="db-sub-operasional" class="subtab-btn active" data-subtab="operasional" data-action="switch-dashboard-subtab">Operasional</button>
+    <button id="db-sub-kehadiran"   class="subtab-btn"        data-subtab="kehadiran"   data-action="switch-dashboard-subtab">Kehadiran</button>
+    <button id="db-sub-terlambat"   class="subtab-btn"        data-subtab="terlambat"   data-action="switch-dashboard-subtab">Keterlambatan</button>
+    <button id="db-sub-lembur"      class="subtab-btn"        data-subtab="lembur"      data-action="switch-dashboard-subtab">Lembur</button>
   </div>
+
+  <!-- ── Sub-tab: OPERASIONAL ──────────────────────────── -->
+  <div id="db-section-operasional" class="db-section active">
+    <div class="card">
+      <div class="card-title">Coverage per Shift</div>
+      <div id="db-shift-coverage"><div class="loading">Memuat data shift...</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Chart Scan dan Posisi per Area</div>
+      <div id="db-area-summary"><div class="loading">Memuat ringkasan area...</div></div>
+      <div id="db-area-detail" class="dashboard-area-detail">
+        <div class="loading">Klik salah satu area untuk melihat daftar nama dan jam masuk.</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Komposisi Jenis Karyawan</div>
+      <div id="db-type-summary"><div class="loading">Memuat ringkasan jenis karyawan...</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Komposisi Departemen</div>
+      <div id="db-dept-summary"><div class="loading">Memuat ringkasan departemen...</div></div>
+      <div id="db-dept-detail" class="dashboard-area-detail">
+        <div class="loading">Klik box departemen untuk melihat siapa saja yang sedang di dalam.</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Kanban Posisi Orang per Area</div>
+      <div id="db-kanban-board"><div class="loading">Memuat kanban area kerja...</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Daftar Orang yang Sedang Di Dalam</div>
+      <div id="db-bound-list"><div class="loading">Memuat data...</div></div>
+    </div>
+  </div>
+
+  <!-- ── Sub-tab: KEHADIRAN ─────────────────────────────── -->
+  <div id="db-section-kehadiran" class="db-section">
+    <div class="card">
+      <div class="card-title">Status Kehadiran Hari Ini</div>
+      <div id="db-kehadiran-summary" class="kehadiran-summary-bar">
+        <div class="loading">Memuat data kehadiran...</div>
+      </div>
+      <div id="db-kehadiran-kanban" class="kanban-board">
+        <div class="loading">Memuat kanban kehadiran...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Sub-tab: KETERLAMBATAN ─────────────────────────── -->
+  <div id="db-section-terlambat" class="db-section">
+    <div class="card">
+      <div class="card-title">Keterlambatan Hari Ini</div>
+      <div id="db-terlambat-summary" class="kehadiran-summary-bar">
+        <div class="loading">Memuat data keterlambatan...</div>
+      </div>
+      <div id="db-terlambat-kanban" class="kanban-board">
+        <div class="loading">Memuat kanban keterlambatan...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Sub-tab: LEMBUR ────────────────────────────────── -->
+  <div id="db-section-lembur" class="db-section">
+    <div class="card">
+      <div class="card-title">Lembur Hari Ini</div>
+      <div id="db-lembur-summary" class="kehadiran-summary-bar">
+        <div class="loading">Memuat data lembur...</div>
+      </div>
+      <div id="db-lembur-kanban" class="kanban-board">
+        <div class="loading">Memuat kanban lembur...</div>
+      </div>
+    </div>
+  </div>
+
   <button class="btn btn-primary" data-action="load-dashboard" type="button" style="margin-bottom:16px"><i class="bi bi-arrow-clockwise"></i> Refresh Dashboard</button>
 </div>
 
@@ -294,6 +460,12 @@
     <div class="field">
       <label>NIK Karyawan (Opsional)</label>
       <input type="text" id="cek-area-nik" placeholder="Masukkan NIK atau biarkan kosong..." autocomplete="off" autocapitalize="characters" inputmode="text" spellcheck="false">
+    </div>
+    <div class="field">
+      <label>Filter Departemen</label>
+      <select id="cek-area-dept">
+        <option value="">Semua Departemen</option>
+      </select>
     </div>
     <div class="period-grid">
       <div class="field">

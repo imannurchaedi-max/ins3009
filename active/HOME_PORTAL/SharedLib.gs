@@ -298,6 +298,120 @@ function detectShift(d) {
   }
 }
 
+// ---- SHIFT CONFIG & KETERLAMBATAN UTILITIES ----
+
+// Jam standar shift dalam menit sejak 00:00
+// Shift 1 : 06:01 – 14:00
+// Shift 2 : 14:01 – 22:00
+// Shift 3 : 22:01 – 06:00 (lintas tengah malam)
+const SHIFT_CONFIG = {
+  'Shift 1': { startTotal: 6 * 60 + 1,  endTotal: 14 * 60 + 0  },  // 361  – 840
+  'Shift 2': { startTotal: 14 * 60 + 1, endTotal: 22 * 60 + 0  },  // 841  – 1320
+  'Shift 3': { startTotal: 22 * 60 + 1, endTotal: 6 * 60 + 0   }   // 1321 – 360  (cross-midnight)
+};
+
+/**
+ * Konversi string jam "HH:MM" atau "HH:MM:SS" atau Date ke menit sejak 00:00.
+ * @param {string|Date} value
+ * @returns {number|null}
+ */
+function timeStrToMinutes(value) {
+  try {
+    if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+      return value.getHours() * 60 + value.getMinutes();
+    }
+    const text = asText(value).trim();
+    const match = text.match(/(\d{1,2}):(\d{2})/);
+    if (!match) return null;
+    return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+  } catch(e) {
+    Logger.log('SharedLib.timeStrToMinutes: failed — ' + e.message);
+    return null;
+  }
+}
+
+/**
+ * Hitung menit keterlambatan.
+ * Nilai negatif = hadir sebelum jam shift mulai (on time).
+ * @param {string|Date} jamMasukValue - jam masuk aktual
+ * @param {string} shiftLabel         - 'Shift 1' / 'Shift 2' / 'Shift 3'
+ * @returns {number|null}             - null jika data tidak valid
+ */
+function getLateMinutes(jamMasukValue, shiftLabel) {
+  try {
+    const cfg = SHIFT_CONFIG[shiftLabel];
+    if (!cfg) return null;
+    const actual = timeStrToMinutes(jamMasukValue);
+    if (actual === null) return null;
+    return actual - cfg.startTotal;
+  } catch(e) {
+    Logger.log('SharedLib.getLateMinutes: failed — ' + e.message);
+    return null;
+  }
+}
+
+/**
+ * Kategorikan keterlambatan berdasarkan menit.
+ * @param {number|null} minutes
+ * @returns {'ontime'|'ringan'|'sedang'|'berat'|'unknown'}
+ */
+function getLateCategory(minutes) {
+  if (minutes === null || minutes === undefined) return 'unknown';
+  if (minutes <= 0)  return 'ontime';
+  if (minutes < 15)  return 'ringan';   //  1 – 14 menit
+  if (minutes < 30)  return 'sedang';   // 15 – 29 menit
+  return 'berat';                        // >= 30 menit
+}
+
+/**
+ * Hitung menit lembur (jam keluar aktual melebihi jam selesai shift).
+ * Mengembalikan 0 jika belum keluar atau belum lewat jam shift selesai.
+ * Shift 3 (cross-midnight): jam keluar < 06:00 dihitung sebagai lembur jika > endTotal.
+ * @param {string|Date} jamKeluarValue - jam keluar aktual
+ * @param {string} shiftLabel           - 'Shift 1' / 'Shift 2' / 'Shift 3'
+ * @returns {number}                    - menit lembur (0 jika tidak ada)
+ */
+function getOvertimeMinutes(jamKeluarValue, shiftLabel) {
+  try {
+    const cfg = SHIFT_CONFIG[shiftLabel];
+    if (!cfg) return 0;
+    const actual = timeStrToMinutes(jamKeluarValue);
+    if (actual === null) return 0;
+
+    // Shift 3 lintas tengah malam: jam keluar bisa < 360 (sebelum 06:00)
+    // Normalkan: jika shift 3 dan jam keluar < startTotal (22:01),
+    // tambah 24*60 agar bisa dibandingkan lurus
+    let effectiveActual = actual;
+    let effectiveEnd    = cfg.endTotal;
+    if (shiftLabel === 'Shift 3') {
+      // endTotal = 360 (06:00). Kita pakai frame: start=1321, end=360+1440=1800
+      effectiveEnd = cfg.endTotal + 24 * 60;  // 360 + 1440 = 1800
+      if (actual < cfg.startTotal) {
+        effectiveActual = actual + 24 * 60;   // mis. 05:30 → 05:30 + 24h = 1770
+      }
+    }
+
+    const over = effectiveActual - effectiveEnd;
+    return over > 0 ? over : 0;
+  } catch(e) {
+    Logger.log('SharedLib.getOvertimeMinutes: failed — ' + e.message);
+    return 0;
+  }
+}
+
+/**
+ * Format menit ke string ringkas, misal: 89 → "1j 29m", 14 → "14m"
+ * @param {number} minutes
+ * @returns {string}
+ */
+function formatDurationMinutes(minutes) {
+  if (!minutes || minutes <= 0) return '0m';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return m + 'm';
+  return h + 'j ' + (m > 0 ? m + 'm' : '');
+}
+
 // ---- LOCKING ----
 
 function withDocumentLock(work) {

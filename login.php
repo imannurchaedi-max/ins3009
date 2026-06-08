@@ -8,7 +8,7 @@ if (isset($_SESSION['status']) && $_SESSION['status'] == 'login') {
 }
 
 if (isset($_POST['login'])) {
-    $username = $_POST['username'] ?? '';
+    $username = isset($_POST['username']) ? htmlspecialchars($_POST['username'], ENT_QUOTES, 'UTF-8') : '';
     $rawPass = $_POST['password'] ?? '';
     
     if (empty($username) || empty($rawPass)) {

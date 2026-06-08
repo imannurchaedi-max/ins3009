@@ -1,0 +1,92 @@
+flowchart TD
+    classDef iot fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
+    classDef db fill:#f3e8ff,stroke:#a855f7,color:#581c87
+    classDef api fill:#dcfce7,stroke:#22c55e,color:#14532d
+    classDef page fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
+    classDef fn fill:#fef9c3,stroke:#eab308,color:#713f12
+
+    IOT["🏭 IoT Devices\nBHP 1-5 + AHP 1"]:::iot
+
+    subgraph Write["✍️ Write Path (Real-time)"]
+        SL[(speed_line\n1 row/menit\ndevice_id, speed, created_at)]:::db
+        CS[(current_shift\nkumulatif output\ndevice_id, output, created_at)]:::db
+    end
+
+    subgraph ShiftEnd["🔄 Shift-End Process"]
+        SE["DB trigger / cron script\ncopy current_shift → last_shift\nreset current_shift"]:::fn
+    end
+
+    subgraph Historical["📦 Historical Storage"]
+        LS[(last_shift\nper-shift archive\ndevice_id, output, sku)]:::db
+        LS2[(last_2shift)]:::db
+        LS3[(last_3shift)]:::db
+        TLD[(total_lastday)]:::db
+    end
+
+    subgraph SKUStore["🏷️ SKU Lookup"]
+        SKUH[(sku_history\ndevice_id, sku_new, changed_at)]:::db
+    end
+
+    IOT -->|"speed per menit (INT)"| SL
+    IOT -->|"output += delta (INT)"| CS
+    CS -->|"at shift boundary"| SE
+    SE -->|"INSERT + RESET"| LS
+
+    subgraph ModeB["data.php — Mode B: Shift Scope (default)"]
+        B1["1. getCurrentShiftScope()\n→ start/end timestamps"]:::fn
+        B2["2. SELECT speed_line WHERE created_at BETWEEN start AND now"]:::api
+        B3["3. SELECT current_shift (realtime output)"]:::api
+        B4["4. Audit delta dari current_shift"]:::api
+        B5["5. SELECT sku_history (SKU aktif)"]:::api
+        B6["6. Hitung shift_targets\n(elapsed_ratio × target_total)"]:::fn
+        B7["7. calculateStopEvents(history)"]:::fn
+        B8["JSON Response:\nspeed, latest_speed, realtime_output,\naudit_output, settings, shift_info,\nchart_labels, shift_targets, stop_events"]:::api
+        B1 --> B2 --> B3 --> B4 --> B5 --> B6 --> B7 --> B8
+    end
+
+    subgraph ModeC["data.php — Mode C: Quick Filter (hours param)"]
+        C1["SELECT speed_line WHERE created_at >= NOW() - interval"]:::api
+        C2["Audit delta current_shift di interval"]:::api
+        C3["SELECT sku_history → target_range ∝ hours/8"]:::api
+        C4["calculateStopEvents(history)"]:::fn
+        C5["JSON Response:\nspeed, latest_speed, realtime_output,\naudit_output, settings, stop_events"]:::api
+        C1 --> C2 --> C3 --> C4 --> C5
+    end
+
+    subgraph ModeA["data.php — Mode A: Deep Analysis (date range)"]
+        A1["SELECT speed_line WHERE created_at BETWEEN date_from AND date_to"]:::api
+        A2["Audit delta current_shift di range"]:::api
+        A3["SELECT sku_history at date_to → target proporsional hours/8"]:::api
+        A4["calculateStopEvents(history, mArray)"]:::fn
+        A5["JSON Response:\nlabels, values, total_audit,\ntarget_range, hours_in_range, stop_events"]:::api
+        A1 --> A2 --> A3 --> A4 --> A5
+    end
+
+    subgraph OEEFlow["get_oee_data.php — OEE Historical"]
+        O1["SELECT last_shift (paginated, 12/page)"]:::api
+        O2["COALESCE: ls.sku → sku_history → 'BELUM SET'"]:::fn
+        O3["CASE WHEN time BETWEEN → shift_id"]:::fn
+        O4["getTargetOutput(device_id, sku)"]:::fn
+        O5["JSON: data[], current_page, total_pages"]:::api
+        O1 --> O2 --> O3 --> O4 --> O5
+    end
+
+    SL --> B2 & C1 & A1
+    CS --> B3 & B4 & C2
+    SKUH --> B5 & C3 & A3 & O2
+    LS --> O1
+
+    B8 -->|"fetch JSON"| SP["speed.php\nChart.js render"]:::page
+    C5 -->|"fetch JSON"| SP
+    A5 -->|"fetch JSON + modal"| SP
+    O5 -->|"fetch JSON"| OP["oee.php\nOEE table"]:::page
+
+    subgraph Mutations["✏️ Write Mutations"]
+        UV_F["POST update_variant.php\nINSERT sku_history"]:::api
+        US_F["POST update_sku.php\nUPDATE last_shift.sku"]:::api
+    end
+
+    SETP["settings.php"]:::page -->|"POST device_id + variant"| UV_F
+    UV_F --> SKUH
+    OP -->|"POST row_id + sku"| US_F
+    US_F --> LS

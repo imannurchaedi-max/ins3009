@@ -1,0 +1,30 @@
+============================================================
+Speed_Mesin -- Architecture Relevance Report
+Project: C:\xampp\htdocs\SM
+PHP files scanned: 19
+Functions found: 43
+============================================================
+
+-- Relevance Issues ----------------------------------------
+  1. ORPHAN: `calculateDowntimeMinutes` defined in data.php:6 -- no external callers found in PHP files
+  2. ORPHAN: `calculateStopEvents` defined in data.php:18 -- no external callers found in PHP files
+  3. ORPHAN: `isMachineStopped` defined in functions.php:62 -- no external callers found in PHP files
+  4. ORPHAN: `showOEE` defined in output.php:30 -- no external callers found in PHP files
+  5. ORPHAN: `sumByGroup` defined in output.php:47 -- no external callers found in PHP files
+  6. ORPHAN: `showOEEBadge` defined in tv_dashboard.php:31 -- no external callers found in PHP files
+
+-- Orphan Functions ----------------------------------------
+  [WARN] calculateDowntimeMinutes (data.php:6)
+  [WARN] calculateStopEvents (data.php:18)
+  [WARN] isMachineStopped (functions.php:62)
+  [WARN] showOEE (output.php:30)
+  [WARN] sumByGroup (output.php:47)
+  [WARN] showOEEBadge (tv_dashboard.php:31)
+
+-- Diagram Render Results -----------------------------------
+  [OK] docs/architecture.png
+  [OK] docs/data-flow.png
+  [OK] docs/function-map.png
+  [OK] docs/io-dependency.png
+
+============================================================

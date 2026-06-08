@@ -7,8 +7,8 @@ include 'functions.php'; // Pastiin file ini isinya koneksi $pdo lu
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     // Ambil data dari Fetch API (URLSearchParams)
     $row_id    = isset($_POST['row_id']) ? (int)$_POST['row_id'] : 0;
-    $device_id = isset($_POST['device_id']) ? trim($_POST['device_id']) : null;
-    $sku       = isset($_POST['sku']) ? strtoupper(str_replace(' ', '', $_POST['sku'])) : null;
+    $device_id = isset($_POST['device_id']) ? htmlspecialchars(trim($_POST['device_id']), ENT_QUOTES, 'UTF-8') : null;
+    $sku       = isset($_POST['sku']) ? strtoupper(str_replace(' ', '', htmlspecialchars($_POST['sku'], ENT_QUOTES, 'UTF-8'))) : null;
 
     if (!$row_id || !$device_id || !$sku) {
         apiError('Data tidak lengkap (ID, device, atau SKU kosong)');

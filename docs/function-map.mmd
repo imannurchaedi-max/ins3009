@@ -1,0 +1,68 @@
+graph LR
+    classDef fn_core fill:#fef9c3,stroke:#eab308,color:#713f12,font-weight:bold
+    classDef fn_data fill:#dcfce7,stroke:#22c55e,color:#14532d
+    classDef caller fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
+    classDef warn fill:#fee2e2,stroke:#ef4444,color:#7f1d1d,stroke-dasharray:5 5
+
+    subgraph functions_php["📦 functions.php — Core Library"]
+        GT["getTargetOutput\n(deviceId, sku)"]:::fn_core
+        GS["getCurrentShiftScope\n()"]:::fn_core
+        GP["getOEEPercentage\n(output, deviceId, sku)"]:::fn_core
+        GSD["getShiftData\n(pdo, tableName)"]:::fn_core
+        GSID["getShiftID\n(timeStr)"]:::warn
+        GSST["getStopSpeedThreshold\n()"]:::fn_core
+        IMS["isMachineStopped\n(speed)"]:::warn
+        AS["apiSuccess\n(data)"]:::fn_core
+        AE["apiError\n(message, httpCode)"]:::fn_core
+    end
+
+    subgraph data_php["📦 data.php — Request Functions"]
+        CDM["calculateDowntimeMinutes\n(startTs, endTs)"]:::fn_data
+        CSE["calculateStopEvents\n(historyData, machineList, threshold)"]:::fn_data
+    end
+
+    %% Internal calls inside functions.php
+    GP -->|"calls"| GT
+    IMS -->|"calls"| GSST
+
+    %% Internal calls inside data.php
+    CSE -->|"calls"| CDM
+    CSE -->|"calls"| GSST
+
+    %% Callers → functions.php
+    DA["data.php"]:::caller
+    GOD["get_oee_data.php"]:::caller
+    US["update_sku.php"]:::caller
+    UV["update_variant.php"]:::caller
+    EO["export_oee.php"]:::caller
+    OUP["output.php"]:::caller
+
+    DA -->|"getCurrentShiftScope"| GS
+    DA -->|"getTargetOutput"| GT
+    DA -->|"calculateStopEvents"| CSE
+    DA -->|"apiError"| AE
+
+    GOD -->|"getTargetOutput"| GT
+    GOD -->|"apiError"| AE
+
+    US -->|"getTargetOutput (validate)"| GT
+    US -->|"apiSuccess"| AS
+    US -->|"apiError"| AE
+
+    UV -->|"getTargetOutput (validate x2)"| GT
+    UV -->|"apiSuccess"| AS
+    UV -->|"apiError"| AE
+
+    EO -->|"getTargetOutput"| GT
+    EO -->|"getOEEPercentage"| GP
+
+    OUP -->|"getShiftData"| GSD
+    OUP -->|"getOEEPercentage"| GP
+    OUP -->|"getTargetOutput"| GT
+
+    %% Orphan warning note
+    note_gsid["⚠️ ORPHAN: getShiftID\ntidak dipanggil dari PHP manapun\nShift logic diduplikat sebagai SQL CASE\ndi get_oee_data.php & export_oee.php"]:::warn
+    note_ims["⚠️ ORPHAN: isMachineStopped\ntidak dipanggil dari PHP manapun\nmungkin hanya dipakai JS frontend"]:::warn
+
+    GSID -.->|"defined but not called"| note_gsid
+    IMS -.->|"defined but not called"| note_ims

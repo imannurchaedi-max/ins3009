@@ -1,0 +1,107 @@
+graph TD
+    classDef input fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
+    classDef output fill:#dcfce7,stroke:#22c55e,color:#14532d
+    classDef fn fill:#fef9c3,stroke:#eab308,color:#713f12,font-weight:bold
+    classDef db fill:#f3e8ff,stroke:#a855f7,color:#581c87
+    classDef warn fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
+
+    %% ═══════════════════════════════════════
+    %% getTargetOutput
+    %% ═══════════════════════════════════════
+    subgraph GT_box["getTargetOutput (functions.php:28)"]
+        GT_I1["IN: deviceId\ne.g. 'BHP 1', 'AHP 1'"]:::input
+        GT_I2["IN: sku\ne.g. 'S40', 'M1', 'L28'"]:::input
+        GT["getTargetOutput"]:::fn
+        GT_O1["OUT: int\n> 0 = target valid (e.g. 240000)\n-1 = SKU tidak valid untuk mesin ini"]:::output
+        GT_I1 & GT_I2 --> GT --> GT_O1
+    end
+
+    %% ═══════════════════════════════════════
+    %% getOEEPercentage
+    %% ═══════════════════════════════════════
+    subgraph GP_box["getOEEPercentage (functions.php:47)"]
+        GP_I1["IN: output (int)\naktual produksi shift"]:::input
+        GP_I2["IN: deviceId (string)"]:::input
+        GP_I3["IN: sku (string)"]:::input
+        GP["getOEEPercentage"]:::fn
+        GP_O1["OUT: int\n0-100 = OEE persen (capped 100%)\n-1 = SKU tidak valid"]:::output
+        GP_I1 & GP_I2 & GP_I3 --> GP --> GP_O1
+        GP -->|"calls"| GT
+    end
+
+    %% ═══════════════════════════════════════
+    %% getCurrentShiftScope
+    %% ═══════════════════════════════════════
+    subgraph GS_box["getCurrentShiftScope (functions.php:99)"]
+        GS_I1["IN: none\n(reads DateTime internally)"]:::input
+        GS["getCurrentShiftScope"]:::fn
+        GS_O1["OUT: array\nname: 'SHIFT 1|2|3'\nstart: DateTime\nend: DateTime\nelapsed_min: int\ntotal_min: 480"]:::output
+        GS_I1 --> GS --> GS_O1
+    end
+
+    %% ═══════════════════════════════════════
+    %% getShiftData
+    %% ═══════════════════════════════════════
+    subgraph GSD_box["getShiftData (functions.php:84)"]
+        GSD_I1["IN: pdo (PDO object)"]:::input
+        GSD_I2["IN: tableName (string)\ne.g. 'current_shift', 'last_shift'\n'last_2shift', 'last_3shift'\n'total_lastday'"]:::input
+        GSD["getShiftData"]:::fn
+        GSD_O1["OUT: array\n[deviceId_noSpace => output_int]\ne.g. ['BHP1'=>15432, 'AHP1'=>8210]"]:::output
+        GSD_I1 & GSD_I2 --> GSD --> GSD_O1
+    end
+
+    %% ═══════════════════════════════════════
+    %% calculateDowntimeMinutes
+    %% ═══════════════════════════════════════
+    subgraph CDM_box["calculateDowntimeMinutes (data.php:7)"]
+        CDM_I1["IN: startTs (string)\n'YYYY-MM-DD HH:MM:SS'"]:::input
+        CDM_I2["IN: endTs (string)\n'YYYY-MM-DD HH:MM:SS'"]:::input
+        CDM["calculateDowntimeMinutes"]:::fn
+        CDM_O1["OUT: int (menit)\nmin 1 jika valid\n0 jika ts invalid atau end < start"]:::output
+        CDM_I1 & CDM_I2 --> CDM --> CDM_O1
+    end
+
+    %% ═══════════════════════════════════════
+    %% calculateStopEvents
+    %% ═══════════════════════════════════════
+    subgraph CSE_box["calculateStopEvents (data.php:19)"]
+        CSE_I1["IN: historyData (array)\nrows dari speed_line\n{device_id, speed, jam_label, ts_full}"]:::input
+        CSE_I2["IN: machineList (array)\ne.g. ['BHP 1','BHP 2',...]"]:::input
+        CSE_I3["IN: stopThreshold (int, optional)\ndefault: 5 rpm"]:::input
+        CSE["calculateStopEvents"]:::fn
+        CSE_O1["OUT: array per machine\n[machineName => {\n  count: int,\n  total_duration: int (menit),\n  last_stop: event|null,\n  all_stops: [{\n    start, end, start_ts, end_ts,\n    duration, ongoing: bool\n  }]\n}]"]:::output
+        CSE_I1 & CSE_I2 & CSE_I3 --> CSE --> CSE_O1
+        CSE -->|"calls"| CDM
+        CSE -->|"getStopSpeedThreshold()"| GSST["getStopSpeedThreshold → 5"]:::fn
+    end
+
+    %% ═══════════════════════════════════════
+    %% apiSuccess / apiError
+    %% ═══════════════════════════════════════
+    subgraph API_box["apiSuccess / apiError (functions.php:142-153)"]
+        AS_I["IN: data (array)\nmerge ke {success:true}"]:::input
+        AE_I["IN: message (string)\nhttpCode (int, default 400)"]:::input
+        AS["apiSuccess"]:::fn
+        AE["apiError"]:::fn
+        AS_O["OUT: JSON echo + exit\n{success:true, ...data}"]:::output
+        AE_O["OUT: JSON echo + exit\nHTTP status set\n{success:false, error:message}"]:::output
+        AS_I --> AS --> AS_O
+        AE_I --> AE --> AE_O
+    end
+
+    %% ═══════════════════════════════════════
+    %% data.php API — Mode B response
+    %% ═══════════════════════════════════════
+    subgraph DA_box["data.php Response Shape"]
+        DA_IN["IN (GET):\nhours='' → Mode B (Shift Scope)\nhours=N → Mode C (Quick N jam)\nmode=deep_analysis → Mode A\n  + machine, date_from, date_to, start, end"]:::input
+        DA_OUT_B["OUT Mode B:\nspeed: [{device_id, speed, jam_label, ts_full}]\nlatest_speed: [{device_id, speed}]\nrealtime_output: [{device_id, output}]\naudit_output: [{device_id, total_range}]\nsettings: [{dev_clean, device_id, current_variant, target_output}]\nshift_info: {shift_name, shift_start, shift_end, elapsed_min, total_min}\nchart_labels: [HH:MM strings]\nshift_targets: [{device_id, target_total, target_projected, elapsed_ratio}]\nstop_events: {per machine}\nmode: 'shift_scope'"]:::output
+        DA_OUT_C["OUT Mode C:\nspeed, latest_speed, realtime_output,\naudit_output, settings, stop_events\nhours_requested"]:::output
+        DA_OUT_A["OUT Mode A:\n{machineName: {\n  labels, values,\n  total_audit,\n  target_range,\n  hours_in_range,\n  stop_events\n}}"]:::output
+        DA_IN --> DA_OUT_B & DA_OUT_C & DA_OUT_A
+    end
+
+    %% ═══════════════════════════════════════
+    %% Orphan functions (tidak dipanggil PHP)
+    %% ═══════════════════════════════════════
+    GSID_warn["⚠️ getShiftID(timeStr)\nIN: 'HH:MM:SS'\nOUT: 'SHIFT 1|2|3'\nSTATUS: ORPHAN — logika\ndiduplikat di SQL CASE"]:::warn
+    IMS_warn["⚠️ isMachineStopped(speed)\nIN: int speed\nOUT: bool\nSTATUS: ORPHAN — tidak\ndipanggil dari PHP manapun"]:::warn

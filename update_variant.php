@@ -7,8 +7,8 @@ if (!isset($_POST['device_id']) || !isset($_POST['variant'])) {
     apiError('Parameter device_id dan variant wajib diisi');
 }
 
-$deviceId = trim($_POST['device_id']);
-$variant  = strtoupper(str_replace(' ', '', $_POST['variant']));
+$deviceId = htmlspecialchars(trim($_POST['device_id']), ENT_QUOTES, 'UTF-8');
+$variant  = strtoupper(str_replace(' ', '', htmlspecialchars($_POST['variant'], ENT_QUOTES, 'UTF-8')));
 
 if (!in_array($deviceId, $MACHINE_LIST, true)) {
     apiError("Mesin '$deviceId' tidak dikenal");
@@ -18,9 +18,9 @@ if (getTargetOutput($deviceId, $variant) === -1) {
     apiError("SKU '$variant' tidak terdaftar atau tidak valid untuk mesin $deviceId");
 }
 
-$startDatetime = !empty($_POST['start_datetime']) ? $_POST['start_datetime'] : null;
-$endDatetime   = !empty($_POST['end_datetime'])   ? $_POST['end_datetime']   : null;
-$revertVariant = !empty($_POST['revert_variant']) ? strtoupper(str_replace(' ', '', $_POST['revert_variant'])) : null;
+$startDatetime = !empty($_POST['start_datetime']) ? htmlspecialchars($_POST['start_datetime'], ENT_QUOTES, 'UTF-8') : null;
+$endDatetime   = !empty($_POST['end_datetime'])   ? htmlspecialchars($_POST['end_datetime'], ENT_QUOTES, 'UTF-8')   : null;
+$revertVariant = !empty($_POST['revert_variant']) ? strtoupper(str_replace(' ', '', htmlspecialchars($_POST['revert_variant'], ENT_QUOTES, 'UTF-8'))) : null;
 
 if ($endDatetime && !$revertVariant) {
     apiError('Revert SKU wajib diisi jika End Time dipakai');

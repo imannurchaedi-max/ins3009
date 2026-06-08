@@ -1,0 +1,90 @@
+graph TB
+    classDef page fill:#dbeafe,stroke:#3b82f6,color:#1e3a5f
+    classDef api fill:#dcfce7,stroke:#22c55e,color:#14532d
+    classDef core fill:#fef9c3,stroke:#eab308,color:#713f12
+    classDef db fill:#f3e8ff,stroke:#a855f7,color:#581c87
+    classDef external fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
+
+    subgraph Browser["🌐 Browser Client"]
+        USR_BROWSER[User]
+    end
+
+    subgraph Auth["🔐 Authentication Layer"]
+        LP[login.php]:::page
+        IP[index.php - Router]:::page
+    end
+
+    subgraph Pages["📄 PHP Pages (View Layer)"]
+        SP[speed.php\nMachine Monitoring]:::page
+        OP[oee.php\nOEE Historical]:::page
+        OUP[output.php\nShift Output Summary]:::page
+        SETP[settings.php\nSKU Config]:::page
+        TVP[tv_dashboard.php\nTV Display]:::page
+    end
+
+    subgraph API["⚡ API Endpoints (Read)"]
+        DA[data.php\n3 modes: shift_scope\nquick_filter, deep_analysis]:::api
+        GOD[get_oee_data.php\nOEE Historical paginated]:::api
+    end
+
+    subgraph Mutation["✏️ Mutation Endpoints (Write)"]
+        US[update_sku.php\nKoreksi SKU OEE record]:::api
+        UV[update_variant.php\nUpdate SKU aktif mesin]:::api
+        EO[export_oee.php\nExport HTML/Excel]:::api
+    end
+
+    subgraph Core["🧰 Core Library"]
+        CF[config.php\ntimezone + PDO connection]:::core
+        FN[functions.php\nbusiness logic + targets]:::core
+    end
+
+    subgraph DB["🗄️ PostgreSQL — db: Speed"]
+        SL[(speed_line\ncreated_at, device_id, speed)]:::db
+        CS[(current_shift\ncreated_at, device_id, output)]:::db
+        LS[(last_shift\ndevice_id, output, sku)]:::db
+        LS2[(last_2shift)]:::db
+        LS3[(last_3shift)]:::db
+        TLD[(total_lastday)]:::db
+        SKUH[(sku_history\ndevice_id, sku_new, changed_at)]:::db
+        USRT[(users\nusername, password)]:::db
+    end
+
+    subgraph IoT["🏭 IoT / Mesin"]
+        M1[BHP 1-5\nAHP 1]:::external
+    end
+
+    %% IoT → DB
+    M1 -->|"speed per menit"| SL
+    M1 -->|"output kumulatif"| CS
+
+    %% User flow
+    USR_BROWSER --> LP
+    LP -->|"session auth"| USRT
+    LP -->|"redirect OK"| IP
+    IP --> SP & OP & OUP & SETP & TVP
+
+    %% Pages → API
+    SP -->|"fetch /data.php"| DA
+    OP -->|"fetch /get_oee_data.php"| GOD
+    OUP -->|"include direct"| CF & FN
+    SETP -->|"POST /update_variant.php"| UV
+    TVP -->|"fetch /data.php"| DA
+    OP -->|"POST /update_sku.php"| US
+    OP -->|"GET /export_oee.php"| EO
+
+    %% API → Core
+    DA & GOD & US & UV & EO --> CF
+    DA & GOD & US & UV & EO --> FN
+
+    %% API → DB reads
+    DA -->|"SELECT"| SL & CS & SKUH
+    GOD -->|"SELECT"| LS & SKUH
+    EO -->|"SELECT"| LS & SKUH
+    OUP -->|"SELECT"| CS & LS & LS2 & LS3 & TLD & SKUH
+
+    %% API → DB writes
+    US -->|"UPDATE last_shift.sku"| LS
+    UV -->|"INSERT sku_history"| SKUH
+
+    %% Shift end process (external/DB trigger)
+    CS -.->|"copy at shift end\n(DB trigger/script)"| LS

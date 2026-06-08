@@ -6,7 +6,8 @@ include 'functions.php';
 
 try {
     $limit = 12; 
-    $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+    $rawPage = isset($_GET['page']) ? htmlspecialchars($_GET['page'], ENT_QUOTES, 'UTF-8') : 1;
+    $page = (int)$rawPage;
     $offset = ($page - 1) * $limit;
 
     $totalQuery = $pdo->query("SELECT COUNT(*) FROM last_shift");

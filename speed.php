@@ -25,10 +25,34 @@
     .downtime-table tbody td { color: #334155; vertical-align: middle; }
     .downtime-empty { color: #94a3b8; font-style: italic; text-align: center; }
     .downtime-duration { font-weight: 800; color: #dc2626; }
+    .tv-mode-active .downtime-details summary { font-size: 4rem !important; padding: 20px 0 10px; }
+    .tv-mode-active .downtime-table { font-size: 2rem !important; }
+    .tv-mode-active .downtime-table thead th { font-size: 1.8rem !important; padding: 15px; }
+    .tv-mode-active .downtime-table tbody td { padding: 15px; }
+    .tv-mode-active .sku-badge { font-size: 1.5rem; padding: 8px 15px; }
+    .tv-mode-active .stop-badge { font-size: 3rem; padding: 15px 25px; }
+    .tv-mode-active .m-title { font-size: 10rem !important; color: #0f172a !important; line-height: 1; margin-bottom: 10px; }
+    .tv-mode-active #shift-info-badge { font-size: 1.5rem !important; padding: 10px 25px !important; }
+    .tv-mode-active span[id^="out_"] { font-size: 3.5rem !important; }
+    .tv-mode-active span[id^="tgt_"] { font-size: 2rem !important; }
+    .tv-mode-active small.text-muted.fw-bold.d-block { font-size: 1.5rem !important; }
+    .tv-mode-active .nav-custom div[style*="font-size: 1.1rem"] { font-size: 2rem !important; }
+    .tv-controls { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(15, 23, 42, 0.9); padding: 10px 20px; border-radius: 30px; display: none; z-index: 9999; backdrop-filter: blur(10px); box-shadow: 0 10px 25px rgba(0,0,0,0.5); gap: 15px; align-items: center; border: 1px solid rgba(255,255,255,0.1); }
+    .tv-btn { background: none; border: none; color: white; font-size: 1.5rem; cursor: pointer; transition: transform 0.2s, color 0.2s; outline: none; }
+    .tv-btn:hover { color: #3498db; transform: scale(1.1); }
+    .tv-indicator { color: #94a3b8; font-size: 0.85rem; font-weight: bold; letter-spacing: 1px; margin: 0 10px; }
 </style>
 
 <div id="offline-banner" class="alert alert-danger text-center shadow-sm fw-bold m-0" style="display:none; position:fixed; top:0; left:0; width:100%; z-index:9999; border-radius:0;">
     <i class="fas fa-exclamation-triangle me-2"></i> KONEKSI TERPUTUS - Mencoba menyambung kembali...
+</div>
+
+<div id="tv-controls" class="tv-controls">
+    <button class="tv-btn" onclick="prevTVSlide()" title="Previous"><i class="fas fa-step-backward"></i></button>
+    <button id="btnTVPause" class="tv-btn" onclick="toggleTVPause()" title="Pause/Play"><i class="fas fa-pause"></i></button>
+    <button class="tv-btn" onclick="nextTVSlide()" title="Next"><i class="fas fa-step-forward"></i></button>
+    <div id="tv-indicator" class="tv-indicator">MACHINE 1/6</div>
+    <button class="tv-btn ms-2" style="color: #e74c3c; font-size: 1.2rem;" onclick="toggleTVMode()" title="Exit TV Mode"><i class="fas fa-times"></i></button>
 </div>
 <div class="nav-custom p-3 m-3 bg-white rounded shadow-sm d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3">
     <div class="d-flex align-items-center">
@@ -45,6 +69,7 @@
                 <option value="<?= $i ?>"><?= $i ?> Jam Terakhir</option>
             <?php endfor; ?>
         </select>
+        <button class="btn btn-sm btn-dark shadow-sm" onclick="toggleTVMode()"><i class="fas fa-tv"></i> TV Mode</button>
     </div>
 </div>
 
@@ -124,6 +149,11 @@ const machines = [
 
 const charts = {};
 let isAnalysisMode = false;
+let tvModeActive = false;
+let tvPaused = false;
+let tvSlideIndex = 0;
+let tvTimer = null;
+let tvMachines = [];
 
 const container = document.getElementById('machine-container');
 machines.forEach(m => {
@@ -133,7 +163,7 @@ machines.forEach(m => {
                 <div class="p-4 d-flex justify-content-between align-items-start bg-white">
                     <div>
                         <div class="d-flex align-items-center gap-2 mb-1">
-                            <div class="fw-bold small text-uppercase text-muted">${m.name}</div>
+                            <div class="fw-bold small text-uppercase text-muted m-title">${m.name}</div>
                             <span id="sku_${m.id}" class="sku-badge">SKU: --</span>
                         </div>
                         <span id="status_${m.id}" class="status-pill badge rounded-pill px-3 py-2" style="font-size: 0.65rem;">Checking...</span>
@@ -189,8 +219,16 @@ function createChart(canvasId, color, maxScale) {
             responsive: true, maintainAspectRatio: false, 
             interaction: { intersect: false, mode: 'index' },
             scales: { 
-                y: { min: 0, max: maxScale, grid: { color: 'rgba(0,0,0,0.05)' }, border: { display: false } }, 
-                x: { grid: { display: false }, ticks: { maxTicksLimit: 30 } } 
+                y: { 
+                    min: 0, max: maxScale, 
+                    grid: { color: 'rgba(0,0,0,0.05)' }, 
+                    border: { display: false },
+                    ticks: { font: { size: 16, weight: 'bold' } }
+                }, 
+                x: { 
+                    grid: { display: false }, 
+                    ticks: { maxTicksLimit: 30, font: { size: 16, weight: 'bold' } } 
+                } 
             },
             plugins: { legend: { display: false } }
         }
@@ -336,12 +374,19 @@ function onMachineToggle() {
     const allChecked = checks.length === document.querySelectorAll('.machine-chk').length;
     document.getElementById('chkAll').checked = allChecked;
 
+    const gridClass = checks.length === 1 ? 'col-xl-12 mb-4 machine-card' : 'col-xl-6 mb-4 machine-card';
+
     // Update card visibility langsung tanpa tunggu interval berikutnya
     if (!isAnalysisMode) {
         machines.forEach(m => {
             const chk = document.getElementById('chk' + m.id);
-            document.getElementById('col_' + m.id).style.display =
-                (chk && !chk.checked) ? 'none' : 'block';
+            const col = document.getElementById('col_' + m.id);
+            if (chk && !chk.checked) {
+                col.style.display = 'none';
+            } else {
+                col.style.display = 'block';
+                col.className = gridClass;
+            }
         });
     }
 }
@@ -365,13 +410,15 @@ function startAnalysis() {
     isAnalysisMode = true;
     document.getElementById('btnReset').style.display = 'inline-block';
 
+    const gridClass = machinesSelected.length === 1 ? 'col-xl-12 mb-4 machine-card' : 'col-xl-6 mb-4 machine-card';
+
     machines.forEach(m => {
         const col = document.getElementById('col_' + m.id);
         const labelOut = col.querySelector('.p-3.bg-light span:first-child');
         
         if (machinesSelected.includes(m.name)) {
             col.style.display = 'block';
-            col.className = 'col-xl-6 mb-4';
+            col.className = gridClass;
             document.getElementById('status_' + m.id).innerText = "📊 DEEP ANALYSIS MODE";
             document.getElementById('status_' + m.id).className = "badge bg-dark rounded-pill px-3 py-2 text-white";
             labelOut.innerText = "Pure Audit Output (Selected Range Only)";
@@ -492,11 +539,17 @@ function updateData() {
                 const mName = m.name;
                 const mClean = mName.replace(/\s+/g, '');
 
-                // Sembunyikan card mesin yang tidak dicentang
+                // Sembunyikan card mesin yang tidak dicentang (kecuali jika TV mode sedang memegang kendali)
                 const chk = document.getElementById('chk' + mId);
                 const col = document.getElementById('col_' + mId);
-                if (chk && !chk.checked) { col.style.display = 'none'; return; }
-                col.style.display = 'block';
+                
+                if (tvModeActive) {
+                    if (mName !== tvMachines[tvSlideIndex]) { col.style.display = 'none'; }
+                    else { col.style.display = 'block'; }
+                } else {
+                    if (chk && !chk.checked) { col.style.display = 'none'; return; }
+                    col.style.display = 'block';
+                }
 
                 const latest = data.latest_speed ? data.latest_speed.find(i => i.device_id === mName) : null;
                 const ppmVal = latest ? Math.round(latest.speed) : 0;
@@ -582,5 +635,110 @@ function updateData() {
 }
 setInterval(updateData, 30000);
 updateData();
+
+// --- TV MODE LOGIC ---
+function toggleTVMode() {
+    if (tvModeActive) { exitTVMode(); return; }
+    
+    // Aktifkan TV Mode
+    tvMachines = Array.from(document.querySelectorAll('.machine-chk:checked')).map(cb => cb.value);
+    if (tvMachines.length === 0) { alert("Pilih minimal 1 mesin untuk masuk ke TV Mode!"); return; }
+
+    tvModeActive = true;
+    tvPaused = false;
+    tvSlideIndex = 0;
+    
+    document.body.classList.add('tv-mode-active');
+    document.querySelector('.analytics-section').style.display = 'none';
+    document.getElementById('realtime-filter').style.display = 'none';
+    document.getElementById('tv-controls').style.display = 'flex';
+    document.getElementById('btnTVPause').innerHTML = '<i class="fas fa-pause"></i>';
+    
+    renderTVSlide();
+    
+    tvTimer = setInterval(() => {
+        if (!tvPaused) nextTVSlide();
+    }, 10000);
+}
+
+function exitTVMode() {
+    tvModeActive = false;
+    clearInterval(tvTimer);
+    document.body.classList.remove('tv-mode-active');
+    document.querySelector('.analytics-section').style.display = 'block';
+    document.getElementById('realtime-filter').style.display = 'flex';
+    document.getElementById('tv-controls').style.display = 'none';
+    
+    machines.forEach(m => {
+        const chartBg = document.getElementById('chart_bg_' + m.id);
+        if (chartBg) chartBg.style.height = '250px';
+        
+        if (charts[m.name]) {
+            charts[m.name].options.scales.x.ticks.font.size = 16;
+            charts[m.name].options.scales.y.ticks.font.size = 16;
+            charts[m.name].data.datasets[0].borderWidth = 2;
+            charts[m.name].update('none');
+        }
+    });
+    
+    onMachineToggle(); // restore grid
+}
+
+function renderTVSlide() {
+    if (!tvModeActive) return;
+    const currentM = tvMachines[tvSlideIndex];
+    document.getElementById('tv-indicator').innerText = `SHOWING: ${currentM} (${tvSlideIndex + 1}/${tvMachines.length})`;
+    
+    machines.forEach(m => {
+        const col = document.getElementById('col_' + m.id);
+        const chartBg = document.getElementById('chart_bg_' + m.id);
+        if (m.name === currentM) {
+            col.style.display = 'block';
+            col.className = 'col-xl-12 mb-4 machine-card';
+            if (chartBg) chartBg.style.height = '60vh';
+            
+            if (charts[m.name]) {
+                charts[m.name].options.scales.x.ticks.font.size = 30;
+                charts[m.name].options.scales.y.ticks.font.size = 30;
+                charts[m.name].data.datasets[0].borderWidth = 8;
+                charts[m.name].update('none');
+            }
+        } else {
+            col.style.display = 'none';
+        }
+    });
+}
+
+function nextTVSlide() {
+    if (tvMachines.length === 0) return;
+    tvSlideIndex = (tvSlideIndex + 1) % tvMachines.length;
+    renderTVSlide();
+}
+
+function prevTVSlide() {
+    if (tvMachines.length === 0) return;
+    tvSlideIndex = (tvSlideIndex - 1 + tvMachines.length) % tvMachines.length;
+    renderTVSlide();
+}
+
+function toggleTVPause() {
+    tvPaused = !tvPaused;
+    const btn = document.getElementById('btnTVPause');
+    if (tvPaused) {
+        btn.innerHTML = '<i class="fas fa-play"></i>';
+        btn.style.color = '#e74c3c';
+    } else {
+        btn.innerHTML = '<i class="fas fa-pause"></i>';
+        btn.style.color = 'white';
+    }
+}
+
+document.addEventListener('keydown', (e) => {
+    if (!tvModeActive) return;
+    if (e.key === 'ArrowRight') { nextTVSlide(); }
+    else if (e.key === 'ArrowLeft') { prevTVSlide(); }
+    else if (e.key === ' ') { e.preventDefault(); toggleTVPause(); }
+    else if (e.key === 'Escape') { exitTVMode(); }
+});
 </script>
 <?php include 'footer.php'; ?>

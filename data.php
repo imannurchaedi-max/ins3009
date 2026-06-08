@@ -89,10 +89,14 @@ try {
 
     // --- MODE A: DEEP ANALYSIS (Analyze Button) ---
     if (isset($_GET['mode']) && $_GET['mode'] == 'deep_analysis') {
-        $mRaw = $_GET['machine'] ?? '';
+        $mRaw = isset($_GET['machine']) ? htmlspecialchars($_GET['machine'], ENT_QUOTES, 'UTF-8') : '';
         $mArray = $mRaw ? array_filter(array_map('trim', explode(',', $mRaw))) : [];
-        $start = ($_GET['date_from'] ?? date('Y-m-d')) . ' ' . ($_GET['start'] ?? '00:00') . ':00';
-        $end = ($_GET['date_to'] ?? date('Y-m-d')) . ' ' . ($_GET['end'] ?? '23:59') . ':00';
+        $dFrom = isset($_GET['date_from']) ? htmlspecialchars($_GET['date_from'], ENT_QUOTES, 'UTF-8') : date('Y-m-d');
+        $dStart = isset($_GET['start']) ? htmlspecialchars($_GET['start'], ENT_QUOTES, 'UTF-8') : '00:00';
+        $start = $dFrom . ' ' . $dStart . ':00';
+        $dTo = isset($_GET['date_to']) ? htmlspecialchars($_GET['date_to'], ENT_QUOTES, 'UTF-8') : date('Y-m-d');
+        $dEnd = isset($_GET['end']) ? htmlspecialchars($_GET['end'], ENT_QUOTES, 'UTF-8') : '23:59';
+        $end = $dTo . ' ' . $dEnd . ':00';
 
         if (empty($mArray)) {
             echo json_encode([]); exit;
@@ -182,7 +186,8 @@ try {
 
     // --- MODE B: SHIFT SCOPE (default - chart mengikuti awal shift) ---
     // Jika parameter hours tidak diberikan / kosong, otomatis pakai scope shift aktif
-    if (!isset($_GET['hours']) || $_GET['hours'] === '') {
+    $checkHours = isset($_GET['hours']) ? htmlspecialchars($_GET['hours'], ENT_QUOTES, 'UTF-8') : '';
+    if ($checkHours === '') {
         $shiftScope = getCurrentShiftScope();
         $startDt = $shiftScope['start'];
         $endDt   = $shiftScope['end'];
@@ -300,7 +305,8 @@ try {
     }
 
     // --- MODE C: QUICK FILTER (dropdown 1-24 jam) ---
-    $hours = (float)($_GET['hours'] ?? 8);
+    $rawHours = isset($_GET['hours']) ? htmlspecialchars($_GET['hours'], ENT_QUOTES, 'UTF-8') : 8;
+    $hours = (float)($rawHours !== '' ? $rawHours : 8);
     $fetchHours = ($hours <= 1.0) ? 2.0 : $hours; 
     $interval = $fetchHours . ' hours';
     $auditInterval = $hours . ' hours';

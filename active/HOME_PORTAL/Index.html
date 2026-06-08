@@ -521,6 +521,66 @@
     <div class="card-title">Revisi Catatan Absen / Area</div>
     <p style="font-size:13px;color:#666;">Gunakan form ini untuk merevisi data karyawan (Fitur dalam pengembangan).</p>
   </div>
+
+  <!-- ── Manajemen Jadwal Shift ─────────────────────────── -->
+  <div class="card">
+    <div class="card-title">Manajemen Jadwal Shift</div>
+    <p style="font-size:12px;color:#666;margin-bottom:14px;">
+      Atur jadwal shift karyawan. Data ini digunakan untuk menghitung
+      <strong>coverage %</strong> pada dashboard shift.
+    </p>
+
+    <!-- Form tambah jadwal -->
+    <div class="jadwal-form">
+      <div class="field">
+        <label>NIK Karyawan</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="jadwal-nik" placeholder="Ketik NIK atau nama..." autocomplete="off"
+            style="flex:1" data-action="search-karyawan" data-context="jadwal">
+          <button class="btn btn-secondary" type="button" data-action="lookup-jadwal-nik">Cari</button>
+        </div>
+        <div id="jadwal-nik-info" style="font-size:12px;color:#2d7a4a;margin-top:4px;min-height:16px"></div>
+      </div>
+      <div class="field">
+        <label>Shift</label>
+        <select id="jadwal-shift">
+          <option value="">-- Pilih Shift --</option>
+          <option value="Shift 1">Shift 1 (06:01 – 14:00)</option>
+          <option value="Shift 2">Shift 2 (14:01 – 22:00)</option>
+          <option value="Shift 3">Shift 3 (22:01 – 06:00)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Tanggal Mulai</label>
+        <input type="date" id="jadwal-tanggal-mulai">
+      </div>
+      <div class="field">
+        <label>Tanggal Selesai <span style="color:#aaa;font-weight:400">(kosongkan = permanen)</span></label>
+        <input type="date" id="jadwal-tanggal-selesai">
+      </div>
+      <div id="jadwal-result" style="min-height:20px;font-size:13px;margin:8px 0"></div>
+      <button class="btn btn-primary" type="button" data-action="save-jadwal-shift">
+        <i class="bi bi-calendar-check"></i> Simpan Jadwal
+      </button>
+    </div>
+
+    <!-- Filter & tabel jadwal -->
+    <div style="margin-top:20px;border-top:1px solid var(--dam-border);padding-top:14px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+        <strong style="font-size:13px">Daftar Jadwal</strong>
+        <select id="jadwal-filter-dept" style="font-size:12px;padding:4px 8px;border-radius:8px;border:1px solid var(--dam-border)">
+          <option value="">Semua Dept</option>
+        </select>
+        <button class="btn btn-secondary" type="button" data-action="load-jadwal-shift"
+          style="font-size:12px;padding:6px 12px">
+          <i class="bi bi-arrow-clockwise"></i> Muat Ulang
+        </button>
+      </div>
+      <div id="jadwal-table-wrap">
+        <div class="loading">Klik "Muat Ulang" untuk menampilkan daftar jadwal.</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>

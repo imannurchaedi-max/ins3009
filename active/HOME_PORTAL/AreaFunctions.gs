@@ -689,14 +689,38 @@ function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter) {
       }
     });
 
+    // ── Coverage dari JADWAL_SHIFT ────────────────────────
+    const expectedList = getKaryawanExpectedForDate(tanggalDisplay);
+    const expectedByShift = { 'Shift 1': 0, 'Shift 2': 0, 'Shift 3': 0 };
+    let totalExpected = 0;
+    expectedList.forEach(function(e) {
+      // Apply dept/type filter juga ke expected
+      if (deptF && (e.dept || '').toUpperCase() !== deptF) return;
+      const sl = e.shift || '';
+      if (shiftF && sl !== shiftF) return;
+      if (expectedByShift[sl] !== undefined) expectedByShift[sl]++;
+      totalExpected++;
+    });
+
     const shiftOrder = ['Shift 1', 'Shift 2', 'Shift 3'];
     const byShift = shiftOrder.map(function(s) {
-      return byShiftMap[s] || { label: s, hadir: 0, terlambat: 0, lembur: 0 };
+      const base = byShiftMap[s] || { label: s, hadir: 0, terlambat: 0, lembur: 0 };
+      const exp  = expectedByShift[s] || 0;
+      return Object.assign({}, base, {
+        expected:     exp,
+        coverage_pct: exp > 0 ? Math.round((base.hadir / exp) * 100) : null
+      });
     });
     // Tambahkan shift lain jika ada
     Object.keys(byShiftMap).forEach(function(s) {
-      if (shiftOrder.indexOf(s) === -1) byShift.push(byShiftMap[s]);
+      if (shiftOrder.indexOf(s) === -1) {
+        byShift.push(Object.assign({}, byShiftMap[s], { expected: 0, coverage_pct: null }));
+      }
     });
+
+    const coveragePct = totalExpected > 0
+      ? Math.round((totalHadir / totalExpected) * 100)
+      : null;
 
     return {
       ok: true,
@@ -709,6 +733,8 @@ function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter) {
         totalTerlambat: { ringan: totalRingan, sedang: totalSedang, berat: totalBerat },
         totalLembur,
         totalAnomali,
+        totalExpected,
+        coveragePct,
         byShift
       },
       kehadiranList,

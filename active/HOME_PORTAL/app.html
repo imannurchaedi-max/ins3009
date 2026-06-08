@@ -1271,12 +1271,21 @@ function switchDashboardSubtab(subtab) {
 }
 
 function populateDeptFilterOptions() {
-  const sel = document.getElementById('db-dept-filter');
-  if (!sel) return;
   const depts = Array.isArray(STATE.availableDepts) ? STATE.availableDepts : [];
-  const currentVal = sel.value;
-  sel.innerHTML = '<option value="">Semua Dept</option>' +
-    depts.map(d => `<option value="${escHtml(d)}"${d === currentVal ? ' selected' : ''}>${escHtml(d)}</option>`).join('');
+  // Dashboard filter
+  const sel = document.getElementById('db-dept-filter');
+  if (sel) {
+    const currentVal = sel.value;
+    sel.innerHTML = '<option value="">Semua Dept</option>' +
+      depts.map(d => `<option value="${escHtml(d)}"${d === currentVal ? ' selected' : ''}>${escHtml(d)}</option>`).join('');
+  }
+  // Jadwal filter
+  const jadwalSel = document.getElementById('jadwal-filter-dept');
+  if (jadwalSel) {
+    const currentVal = jadwalSel.value;
+    jadwalSel.innerHTML = '<option value="">Semua Dept</option>' +
+      depts.map(d => `<option value="${escHtml(d)}"${d === currentVal ? ' selected' : ''}>${escHtml(d)}</option>`).join('');
+  }
 }
 
 // ── KEHADIRAN DASHBOARD ─────────────────────────────────────
@@ -1363,13 +1372,29 @@ function renderShiftCoverage(shiftCoverage) {
   if (!Array.isArray(shiftCoverage) || !shiftCoverage.length) {
     return '<div class="loading">Data shift belum tersedia.</div>';
   }
-  return `<div class="shift-coverage-grid">${shiftCoverage.map(s => `
-    <div class="shift-coverage-col">
+  return `<div class="shift-coverage-grid">${shiftCoverage.map(s => {
+    const pct     = s.coverage_pct;
+    const hasPct  = pct !== null && pct !== undefined;
+    const barW    = hasPct ? Math.min(100, pct) : 0;
+    const barCls  = hasPct ? (pct < 70 ? 'coverage-bar-low' : pct < 90 ? 'coverage-bar-mid' : 'coverage-bar-ok') : '';
+    const coverageHtml = hasPct
+      ? `<div class="shift-coverage-bar-wrap">
+           <div class="shift-coverage-bar ${barCls}" style="width:${barW}%"></div>
+         </div>
+         <div class="shift-stat ${pct < 70 ? 'warn' : ''}">
+           <span>Coverage</span>
+           <strong>${pct}%</strong>
+         </div>
+         <div class="shift-stat"><span>Expected</span><strong>${s.expected || 0} orang</strong></div>`
+      : `<div class="shift-stat" style="color:#aaa;font-size:11px"><span>Jadwal belum diisi</span><strong>-</strong></div>`;
+    return `<div class="shift-coverage-col">
       <div class="shift-label">${escHtml(s.label)}</div>
       <div class="shift-stat"><span>Hadir</span><strong>${s.hadir || 0} orang</strong></div>
       <div class="shift-stat warn"><span>Terlambat</span><strong>${s.terlambat || 0}</strong></div>
       <div class="shift-stat info"><span>Lembur</span><strong>${s.lembur || 0}</strong></div>
-    </div>`).join('')}</div>`;
+      ${coverageHtml}
+    </div>`;
+  }).join('')}</div>`;
 }
 
 // ── RENDER: KEHADIRAN KANBAN ────────────────────────────────
@@ -1596,6 +1621,154 @@ function loadRecentLogs() {
         </div>`).join('');
     })
     .getRecentAreaLogs(20);
+}
+
+// ── JADWAL SHIFT ───────────────────────────────────────────
+
+function loadJadwalShift() {
+  const dept = (document.getElementById('jadwal-filter-dept') || {}).value || '';
+  const wrap = document.getElementById('jadwal-table-wrap');
+  if (wrap) wrap.innerHTML = '<div class="loading">Memuat daftar jadwal...</div>';
+
+  google.script.run
+    .withFailureHandler(err => {
+      if (wrap) wrap.innerHTML = `<div class="loading">Gagal: ${escHtml(getErrorMessage(err))}</div>`;
+    })
+    .withSuccessHandler(res => {
+      if (!res || !res.ok) {
+        if (wrap) wrap.innerHTML = `<div class="loading">${escHtml(res && res.msg || 'Gagal memuat jadwal.')}</div>`;
+        return;
+      }
+      if (!res.data || !res.data.length) {
+        if (wrap) wrap.innerHTML = '<div class="loading">Belum ada jadwal yang tersimpan.</div>';
+        return;
+      }
+      if (wrap) wrap.innerHTML = renderJadwalTable(res.data);
+
+      // Populate dept filter dari data
+      const depts = [...new Set(res.data.map(d => d.dept).filter(Boolean))].sort();
+      const sel = document.getElementById('jadwal-filter-dept');
+      if (sel) {
+        const cur = sel.value;
+        sel.innerHTML = '<option value="">Semua Dept</option>' +
+          depts.map(d => `<option value="${escHtml(d)}"${d===cur?' selected':''}>${escHtml(d)}</option>`).join('');
+      }
+    })
+    .getJadwalShift(dept);
+}
+
+function renderJadwalTable(data) {
+  return `<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="background:#f0f4f8;text-align:left">
+          <th style="padding:8px 10px">NIK</th>
+          <th style="padding:8px 10px">Nama</th>
+          <th style="padding:8px 10px">Dept</th>
+          <th style="padding:8px 10px">Shift</th>
+          <th style="padding:8px 10px">Mulai</th>
+          <th style="padding:8px 10px">Selesai</th>
+          <th style="padding:8px 10px">Aksi</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${data.map(row => `
+          <tr style="border-bottom:1px solid #eee">
+            <td style="padding:7px 10px">${escHtml(row.nik)}</td>
+            <td style="padding:7px 10px"><strong>${escHtml(row.nama)}</strong></td>
+            <td style="padding:7px 10px">${escHtml(row.dept)}</td>
+            <td style="padding:7px 10px">
+              <span class="badge-shift" style="background:#e8edf3">${escHtml(row.shift)}</span>
+            </td>
+            <td style="padding:7px 10px">${escHtml(row.tanggalMulai)}</td>
+            <td style="padding:7px 10px">${escHtml(row.tanggalSelesai) || '<span style="color:#aaa">Permanen</span>'}</td>
+            <td style="padding:7px 10px">
+              <button class="btn btn-secondary" type="button"
+                style="font-size:11px;padding:3px 8px;color:#c0392b;border-color:#c0392b"
+                onclick="deleteJadwalEntry(${row.rowIndex})">
+                Hapus
+              </button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function saveJadwalEntry() {
+  const nikInput    = document.getElementById('jadwal-nik');
+  const shiftSel    = document.getElementById('jadwal-shift');
+  const mulaiInput  = document.getElementById('jadwal-tanggal-mulai');
+  const selesaiInput= document.getElementById('jadwal-tanggal-selesai');
+  const resultEl    = document.getElementById('jadwal-result');
+
+  const nik    = (nikInput  || {}).value || '';
+  const shift  = (shiftSel  || {}).value || '';
+  const mulai  = (mulaiInput|| {}).value || '';
+  const selesai= (selesaiInput||{}).value || '';
+
+  if (!nik)   { if (resultEl) resultEl.innerHTML = '<span style="color:red">NIK tidak boleh kosong.</span>'; return; }
+  if (!shift) { if (resultEl) resultEl.innerHTML = '<span style="color:red">Pilih shift terlebih dahulu.</span>'; return; }
+  if (!mulai) { if (resultEl) resultEl.innerHTML = '<span style="color:red">Tanggal mulai wajib diisi.</span>'; return; }
+
+  if (resultEl) resultEl.innerHTML = '<span style="color:#888">Menyimpan...</span>';
+
+  google.script.run
+    .withFailureHandler(err => {
+      if (resultEl) resultEl.innerHTML = `<span style="color:red">Gagal: ${escHtml(getErrorMessage(err))}</span>`;
+    })
+    .withSuccessHandler(res => {
+      if (!res || !res.ok) {
+        if (resultEl) resultEl.innerHTML = `<span style="color:red">${escHtml(res && res.msg || 'Gagal menyimpan.')}</span>`;
+        return;
+      }
+      if (resultEl) resultEl.innerHTML = `<span style="color:#2d7a4a">✓ ${escHtml(res.msg)}</span>`;
+      // Clear form
+      if (nikInput)    nikInput.value    = '';
+      if (shiftSel)    shiftSel.value    = '';
+      if (mulaiInput)  mulaiInput.value  = '';
+      if (selesaiInput)selesaiInput.value= '';
+      const nikInfo = document.getElementById('jadwal-nik-info');
+      if (nikInfo) nikInfo.textContent = '';
+      // Reload table
+      loadJadwalShift();
+    })
+    .saveJadwalShift(nik, shift, mulai, selesai);
+}
+
+function deleteJadwalEntry(rowIndex) {
+  if (!confirm('Hapus jadwal ini?')) return;
+  const wrap = document.getElementById('jadwal-table-wrap');
+
+  google.script.run
+    .withFailureHandler(err => {
+      alert('Gagal hapus: ' + getErrorMessage(err));
+    })
+    .withSuccessHandler(res => {
+      if (!res || !res.ok) { alert(res && res.msg || 'Gagal hapus.'); return; }
+      loadJadwalShift();
+    })
+    .deleteJadwalShift(rowIndex);
+}
+
+function lookupJadwalNik() {
+  const nikInput = document.getElementById('jadwal-nik');
+  const infoEl   = document.getElementById('jadwal-nik-info');
+  const nik = (nikInput || {}).value || '';
+  if (!nik) return;
+
+  google.script.run
+    .withFailureHandler(() => {})
+    .withSuccessHandler(res => {
+      if (res && res.ok && res.data && res.data.length) {
+        const k = res.data[0];
+        if (infoEl) infoEl.textContent = '✓ ' + k.nama + ' · ' + k.dept + ' · ' + k.jabatan;
+        if (nikInput) nikInput.value = k.nik;
+      } else {
+        if (infoEl) infoEl.innerHTML = '<span style="color:red">NIK tidak ditemukan.</span>';
+      }
+    })
+    .searchKaryawan(nik);
 }
 
 // ── HELPERS ────────────────────────────────────────────────
@@ -2826,6 +2999,9 @@ function bindUiEvents() {
     if (action === 'confirm-masuk') confirmMasuk();
     if (action === 'confirm-keluar') confirmKeluar();
     if (action === 'load-dashboard') loadDashboard();
+    if (action === 'save-jadwal-shift') saveJadwalEntry();
+    if (action === 'load-jadwal-shift') loadJadwalShift();
+    if (action === 'lookup-jadwal-nik') lookupJadwalNik();
     if (action === 'process-absen-report') processAbsenReport();
     if (action === 'export-absen-report') exportAbsenReport();
     if (action === 'process-area-report') processAreaReport();

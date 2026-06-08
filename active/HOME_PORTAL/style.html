@@ -974,6 +974,57 @@
     }
 
 /* ───────────────────────────────────────────────────────── */
+/*  SHIFT COVERAGE PROGRESS BAR                             */
+/* ───────────────────────────────────────────────────────── */
+
+    .shift-coverage-bar-wrap {
+      height: 6px;
+      background: #e8edf3;
+      border-radius: 999px;
+      margin: 6px 0 4px;
+      overflow: hidden;
+    }
+    .shift-coverage-bar {
+      height: 100%;
+      border-radius: 999px;
+      transition: width 0.4s ease;
+    }
+    .coverage-bar-ok  { background: #43a047; }
+    .coverage-bar-mid { background: var(--orange); }
+    .coverage-bar-low { background: var(--red); }
+
+/* ───────────────────────────────────────────────────────── */
+/*  JADWAL SHIFT FORM                                       */
+/* ───────────────────────────────────────────────────────── */
+
+    .jadwal-form {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      background: #f8fbfd;
+      border: 1px solid var(--dam-border);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .jadwal-form .field label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #607080;
+      display: block;
+      margin-bottom: 4px;
+    }
+    .jadwal-form .field input,
+    .jadwal-form .field select {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid var(--dam-border);
+      border-radius: 8px;
+      font-size: 13px;
+      font-family: inherit;
+      background: white;
+    }
+
+/* ───────────────────────────────────────────────────────── */
 /*  CHIPS RADIO BUTTONS                                     */
 /* ───────────────────────────────────────────────────────── */
 .chips-container {

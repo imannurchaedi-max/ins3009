@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <!-- iOS Camera Permission -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>DAM Access Control</title>
+  <!-- Google Fonts: Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <script> const GLOBAL_SESSION_NIK = "<?= sessionNik ?>"; </script>
+  <?!= include('style'); ?>
+  </head>
+<body>
+
+<!-- LOGIN PAGE -->
+<div id="page-login" class="page active">
+  <div class="login-container">
+    <div id="session-bootstrap" style="display:none;">
+      <div class="loading" style="padding:24px 0;">Memuat sesi dari Home Portal...</div>
+    </div>
+    <div id="login-form-content">
+      <div class="login-logo"><i class="bi bi-shield-lock"></i></div>
+      <div class="login-title">DAM ACCESS</div>
+      <div class="login-subtitle">Silakan masuk untuk melanjutkan</div>
+      
+      <div class="login-input-group">
+        <label>NIK</label>
+        <input type="text" id="login-nik" placeholder="Masukkan NIK" autocomplete="off" autocapitalize="none">
+      </div>
+      <div class="login-input-group">
+        <label>Password</label>
+        <input type="password" id="login-password" placeholder="Kosongkan jika belum diset" autocomplete="off">
+      </div>
+      
+      <button class="btn btn-primary btn-login" type="button" data-action="submit-login" style="width:100%;">MASUK</button>
+    </div>
+  </div>
+</div>
+
+<!-- HEADER -->
+<div class="header" id="app-header" style="display:none;">
+  <button class="btn-hamburger" id="btn-hamburger" type="button"><i class="bi bi-list"></i></button>
+  <img id="dam-logo" src="https://drive.google.com/uc?export=view&id=1whcLhiklfyZutRFIYUi6ZLweOcvJ_w0T"
+       alt="DAM Logo">
+  <div class="header-text" style="flex:1;">
+    <h1>DAM ACCESS CONTROL</h1>
+    <p>PT DAYA ANUGRAH MULYA</p>
+  </div>
+  <div class="header-user">
+    <div id="header-user-name">-</div>
+    <button class="btn-logout" data-action="submit-logout" type="button"><i class="bi bi-box-arrow-right"></i> Keluar</button>
+  </div>
+</div>
+
+<!-- TAB BAR -->
+<div class="tab-bar" id="app-tabbar" style="display:none;">
+  <button class="tab-btn" data-action="switch-tab" data-tab="masuk" type="button" id="tab-btn-masuk">
+    <i class="bi bi-box-arrow-in-right tab-icon"></i>MASUK
+  </button>
+  <button class="tab-btn" data-action="switch-tab" data-tab="keluar" type="button" id="tab-btn-keluar">
+    <i class="bi bi-box-arrow-right tab-icon"></i>KELUAR
+  </button>
+  <button class="tab-btn" data-action="switch-tab" data-tab="security" type="button" id="tab-btn-security">
+    <i class="bi bi-qr-code-scan tab-icon"></i>SCAN AREA
+  </button>
+  <button class="tab-btn" data-action="switch-tab" data-tab="dashboard" type="button" id="tab-btn-dashboard">
+    <i class="bi bi-bar-chart-line tab-icon"></i>DASHBOARD
+  </button>
+  <button class="tab-btn" data-action="switch-tab" data-tab="cek-absen" type="button" id="tab-btn-cek-absen">
+    <span class="tab-icon">CEK</span>ABSEN
+  </button>
+  <button class="tab-btn" data-action="switch-tab" data-tab="cek-area" type="button" id="tab-btn-cek-area">
+    <span class="tab-icon">LOG</span>AREA
+  </button>
+  <button class="tab-btn" data-action="switch-tab" data-tab="export-laporan" type="button" id="tab-btn-export-laporan">
+    <i class="bi bi-download tab-icon"></i>EXPORT
+  </button>
+  <button class="tab-btn" data-action="switch-tab" data-tab="revisi-catatan" type="button" id="tab-btn-revisi-catatan">
+    <i class="bi bi-pencil-square tab-icon"></i>REVISI
+  </button>
+</div>
+
+<!-- SIDEBAR OVERLAY -->
+<div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+<div id="page-masuk" class="page">
+
+  <div class="card">
+    <div class="card-title">1. Data Karyawan</div>
+
+    <div class="field" style="margin-bottom: 12px;">
+      <label>NIK</label>
+      <input type="text" id="masuk-nik" readonly style="background-color: #f5f5f5; color: #555;">
+    </div>
+    <div class="field" style="margin-bottom: 16px;">
+      <label>Nama Karyawan</label>
+      <input type="text" id="masuk-nama-input" readonly style="background-color: #f5f5f5; color: #555;">
+    </div>
+    <div class="field" style="margin-bottom: 12px;">
+      <label>Departemen</label>
+      <input type="text" id="masuk-dept" readonly style="background-color: #f5f5f5; color: #555;">
+    </div>
+    <div class="field" style="margin-bottom: 16px;">
+      <label>Jabatan</label>
+      <input type="text" id="masuk-jabatan" readonly style="background-color: #f5f5f5; color: #555;">
+    </div>
+    <div class="field" style="margin-bottom: 12px;">
+      <label>Cari berdasarkan NIK (Opsional)</label>
+      <div class="autocomplete-wrap">
+        <input type="text" id="masuk-nik-input" data-action="search-karyawan" data-context="masuk" placeholder="Masukkan NIK atau biarkan kosong" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">
+        <div id="masuk-list" class="autocomplete-list"></div>
+      </div>
+    </div>
+    <div class="field" style="margin-bottom: 16px;">
+      <label>Nomor Loker (Opsional)</label>
+      <input type="text" id="masuk-loker" placeholder="Misal: A-12" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">
+    </div>
+  </div>
+
+  <div class="card" id="masuk-scanner-card">
+    <div class="card-title">2. Scan Kartu MK / NIK</div>
+
+    <button class="btn btn-scan-qr" type="button" onclick="openLiveScanner('masuk')" style="display:flex; width: 100%; margin-bottom: 16px; justify-content: center; cursor: pointer; border: none; align-items:center;">
+      <i class="bi bi-camera" style="font-size:28px; margin-right: 12px;"></i>
+      <span>BUKA KAMERA (SCAN)</span>
+    </button>
+
+    <div class="divider">Input manual</div>
+
+    <div class="field">
+      <div class="serial-row">
+        <input type="text" id="masuk-serial" placeholder="MK00160 / 128000001" value="" autocomplete="off" autocapitalize="characters" inputmode="text" spellcheck="false" style="text-transform:uppercase">
+        <button data-action="submit-serial" data-context="masuk" type="button">SCAN</button>
+      </div>
+    </div>
+
+    <div id="masuk-card-display" style="display:none">
+      <div class="mk-card-display">
+        <div class="mk-label">NO KARTU MK / NIK</div>
+        <div class="mk-num" id="masuk-card-num">-</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="masuk-result" class="result-card"></div>
+
+  <div class="confirm-section" id="masuk-confirm">
+    <button class="btn btn-green" data-action="confirm-masuk" type="button"><i class="bi bi-check-circle"></i> KONFIRMASI MASUK PABRIK</button>
+  </div>
+</div>
+
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!--  TAB 7 : EXPORT LAPORAN                               -->
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<div id="page-export-laporan" class="page">
+  <div class="card">
+    <div class="card-title">Export Laporan</div>
+    <p style="font-size:13px;color:#666;margin-bottom:16px;">Pilih jenis laporan untuk diexport (Fitur dalam pengembangan).</p>
+    <button class="btn btn-outline" type="button" disabled>EXPORT DATA ABSEN</button>
+    <button class="btn btn-outline" type="button" disabled>EXPORT DATA AREA KERJA</button>
+  </div>
+</div>
+
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!--  TAB 8 : REVISI CATATAN                               -->
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<div id="page-revisi-catatan" class="page">
+  <div class="card">
+    <div class="card-title">Revisi Catatan Absen / Area</div>
+    <p style="font-size:13px;color:#666;">Gunakan form ini untuk merevisi data karyawan (Fitur dalam pengembangan).</p>
+  </div>
+</div>
+
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!--  SHARED: QR SCANNER OVERLAY                            -->
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<div id="page-keluar" class="page">
+
+  <div class="card">
+    <div class="card-title">Scan Kartu MK / NIK untuk Keluar</div>
+
+    <button class="btn btn-scan-qr" type="button" onclick="openLiveScanner('keluar')" style="display:flex; width: 100%; margin-bottom: 16px; justify-content: center; cursor: pointer; border: none; align-items:center;">
+      <i class="bi bi-camera" style="font-size:28px; margin-right: 12px;"></i>
+      <span>BUKA KAMERA (SCAN)</span>
+    </button>
+
+    <div class="divider">Input manual</div>
+
+    <div class="field">
+      <div class="serial-row">
+        <input type="text" id="keluar-serial" placeholder="MK00160 / 128000001" value="" autocomplete="off" autocapitalize="characters" inputmode="text" spellcheck="false" style="text-transform:uppercase">
+        <button data-action="submit-serial" data-context="keluar" type="button">SCAN</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="keluar-result" class="result-card"></div>
+
+  <div class="confirm-section" id="keluar-confirm">
+    <div id="keluar-karyawan-chip" class="karyawan-chip" style="margin-bottom:12px">
+      <div class="karyawan-avatar" id="keluar-avatar">?</div>
+      <div class="karyawan-info">
+        <strong id="keluar-nama">-</strong>
+        <span id="keluar-detail">-</span>
+      </div>
+    </div>
+    <div class="field" style="margin-bottom: 16px;">
+      <label>Pengembalian Kunci Loker (Opsional)</label>
+      <input type="text" id="keluar-loker" placeholder="Misal: A-12" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase">
+    </div>
+    <button class="btn btn-danger" data-action="confirm-keluar" type="button"><i class="bi bi-box-arrow-right"></i> KONFIRMASI PULANG / RELEASE KARTU</button>
+  </div>
+</div>
+
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!--  TAB 3 : SECURITY SCAN AREA KERJA                      -->
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<div id="page-security" class="page">
+
+  <div class="card">
+    <div class="card-title">Scan Kartu MK / NIK - Area Kerja</div>
+    <p style="font-size:12px;color:#888;margin-bottom:16px">Security scan setiap karyawan keluar/masuk area kerja</p>
+
+    <div class="field" style="margin-bottom: 16px;">
+      <label>Area yang Diawasi</label>
+      <div class="serial-row">
+        <select id="security-area-select" style="flex:1 1 auto;">
+          <option value="">Pilih area shift...</option>
+          <option value="Produksi">Produksi</option>
+          <option value="WRM">WRM</option>
+          <option value="WFG">WFG</option>
+          <option value="Utility - Cacah">Utility - Cacah</option>
+          <option value="Umum">Umum</option>
+        </select>
+        <button data-action="set-security-area" type="button">SET AREA</button>
+      </div>
+      <div id="security-area-hint" style="margin-top:8px;font-size:12px;color:#666;">Pilih sekali di awal shift. Semua scan berikutnya akan otomatis tercatat ke area ini.</div>
+    </div>
+
+    <button class="btn btn-scan-qr" type="button" onclick="openLiveScanner('security')" style="display:flex; width: 100%; margin-bottom: 16px; justify-content: center; cursor: pointer; border: none; align-items:center;">
+      <i class="bi bi-camera" style="font-size:28px; margin-right: 12px;"></i>
+      <span>BUKA KAMERA (SCAN)</span>
+    </button>
+
+    <div class="field" style="margin-bottom: 16px;">
+      <label>Mode Scan</label>
+      <div class="chips-container" id="security-mode-container">
+        <label class="chip">
+          <input type="radio" name="security_mode" value="AUTO" checked>
+          <span>Otomatis (Tebak In/Out)</span>
+        </label>
+        <label class="chip">
+          <input type="radio" name="security_mode" value="IN">
+          <span>Paksa Masuk (IN)</span>
+        </label>
+        <label class="chip">
+          <input type="radio" name="security_mode" value="OUT">
+          <span>Paksa Keluar (OUT)</span>
+        </label>
+      </div>
+    </div>
+
+
+
+    <div class="field" style="margin-bottom: 16px;">
+      <label>Pilih Keperluan / Catatan</label>
+      <div class="chips-container" id="security-reason-container">
+        <label class="chip">
+          <input type="radio" name="security_reason" value="Istirahat">
+          <span>Istirahat</span>
+        </label>
+        <label class="chip">
+          <input type="radio" name="security_reason" value="Toilet">
+          <span>Toilet</span>
+        </label>
+        <label class="chip">
+          <input type="radio" name="security_reason" value="Sholat">
+          <span>Sholat</span>
+        </label>
+        <label class="chip">
+          <input type="radio" name="security_reason" value="Klinik">
+          <span>Klinik</span>
+        </label>
+        <label class="chip">
+          <input type="radio" name="security_reason" value="Pekerjaan">
+          <span>Pekerjaan</span>
+        </label>
+        <label class="chip">
+          <input type="radio" name="security_reason" value="Lainnya">
+          <span>Lainnya</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="divider">Input manual</div>
+
+    <div class="field">
+      <div class="serial-row">
+        <input type="text" id="security-serial" placeholder="MK00160 / 128000001" value="" autocomplete="off" autocapitalize="characters" inputmode="text" spellcheck="false" style="text-transform:uppercase">
+        <button data-action="submit-serial" data-context="security" type="button">SCAN</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="security-result" class="result-card"></div>
+
+  <div class="card">
+    <div class="card-title">Log Area Kerja Terbaru</div>
+    <div id="security-log-list"><div class="loading">Memuat log...</div></div>
+  </div>
+</div>
+
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!--  TAB 4 : DASHBOARD                                     -->
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<div id="page-dashboard" class="page">
+
+  <div class="stat-grid">
+    <div class="stat-box">
+      <div class="num" id="db-bound">-</div>
+      <div class="lbl">DI DALAM PABRIK</div>
+    </div>
+    <div class="stat-box">
+      <div class="num" id="db-log-today">-</div>
+      <div class="lbl">SCAN AREA HARI INI</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Karyawan Di Dalam Pabrik</div>
+    <div id="db-bound-list"><div class="loading">Memuat data...</div></div>
+  </div>
+
+  <button class="btn btn-primary" data-action="load-dashboard" type="button" style="margin-bottom:16px"><i class="bi bi-arrow-clockwise"></i> Refresh Dashboard</button>
+</div>
+
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!--  JAVASCRIPT                                            -->
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+<!--  QR SCANNER OVERLAY MODAL                              -->
+<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+
+<div id="page-cek-absen" class="page">
+  <div class="card">
+    <div class="card-title">Cek Absen Pabrik</div>
+    <div class="field">
+      <label>NIK Karyawan (Opsional)</label>
+      <input type="text" id="cek-absen-nik" placeholder="Masukkan NIK atau biarkan kosong..." autocomplete="off" autocapitalize="characters" inputmode="text" spellcheck="false">
+    </div>
+    <div class="period-grid">
+      <div class="field">
+        <label>Periode</label>
+        <select id="cek-absen-period-type" data-action="period-type" data-target="cek-absen">
+          <option value="week">Minggu</option>
+          <option value="month">Bulan</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Nilai Periode</label>
+        <input type="week" id="cek-absen-period-value" class="period-input">
+      </div>
+    </div>
+    <button class="btn btn-primary" data-action="process-absen-report" type="button">PROSES</button>
+    <button class="btn btn-outline export-btn" id="cek-absen-export" data-action="export-absen-report" type="button" disabled>EXPORT CSV</button>
+  </div>
+  <div id="cek-absen-result" class="result-card"></div>
+  <div class="card report-card">
+    <div class="card-title">Catatan Jam Masuk / Keluar Pabrik</div>
+    <div id="cek-absen-list"><div class="loading">Masukkan NIK dan periode, lalu klik proses.</div></div>
+  </div>
+</div>
+
+<div id="page-cek-area" class="page">
+  <div class="card">
+    <div class="card-title">Cek Aktivitas Area Kerja</div>
+    <div class="field">
+      <label>NIK Karyawan (Opsional)</label>
+      <input type="text" id="cek-area-nik" placeholder="Masukkan NIK atau biarkan kosong..." autocomplete="off" autocapitalize="characters" inputmode="text" spellcheck="false">
+    </div>
+    <div class="period-grid">
+      <div class="field">
+        <label>Periode</label>
+        <select id="cek-area-period-type" data-action="period-type" data-target="cek-area">
+          <option value="date">Tanggal</option>
+          <option value="week">Minggu</option>
+          <option value="month">Bulan</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Nilai Periode</label>
+        <input type="date" id="cek-area-period-value" class="period-input">
+      </div>
+    </div>
+    <button class="btn btn-primary" data-action="process-area-report" type="button">PROSES</button>
+  </div>
+  <div id="cek-area-result" class="result-card"></div>
+  <div class="card report-card" style="padding-bottom: 0;">
+    <div class="card-title" style="margin-bottom: 15px;">Laporan Area Kerja</div>
+    
+    <ul class="nav nav-pills nav-fill mb-3" id="pills-tab-area" role="tablist" style="margin: 0 -5px;">
+      <li class="nav-item" role="presentation" style="padding: 0 5px;">
+        <button class="nav-link active" id="pills-timestamp-tab" data-bs-toggle="pill" data-bs-target="#pills-timestamp" type="button" role="tab" aria-controls="pills-timestamp" aria-selected="true" style="font-weight:600; border-radius:8px; font-size:14px; box-shadow:0 2px 4px rgba(0,0,0,0.05);">Log Timestamp</button>
+      </li>
+      <li class="nav-item" role="presentation" style="padding: 0 5px;">
+        <button class="nav-link" id="pills-rekap-tab" data-bs-toggle="pill" data-bs-target="#pills-rekap" type="button" role="tab" aria-controls="pills-rekap" aria-selected="false" style="font-weight:600; border-radius:8px; font-size:14px; box-shadow:0 2px 4px rgba(0,0,0,0.05);">Rekap Hitungan</button>
+      </li>
+    </ul>
+
+    <div class="tab-content" id="pills-tabContent-area">
+      <div class="tab-pane fade show active" id="pills-timestamp" role="tabpanel" aria-labelledby="pills-timestamp-tab">
+        <div id="cek-area-list" style="padding-top:10px;"><div class="loading">Masukkan NIK dan periode, lalu klik proses.</div></div>
+      </div>
+      <div class="tab-pane fade" id="pills-rekap" role="tabpanel" aria-labelledby="pills-rekap-tab">
+        <div id="cek-area-rekap-list" style="padding-top:10px;"><div class="loading">Masukkan NIK dan periode, lalu klik proses.</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bootstrap 5 JS Bundle -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<?!= include('app'); ?>
+</body>
+</html>
+

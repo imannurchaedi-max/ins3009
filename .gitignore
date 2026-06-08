@@ -1,0 +1,32 @@
+# Dependencies and virtual environments
+node_modules/
+venv/
+.venv/
+
+# Generated audits and local artifacts
+reports/
+CONTEXT_SUMMARY.md
+_local/
+deployment_urls.json
+
+# Local editor and OS files
+.clinerules
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Local patch helpers and scratch files
+fix_app.js
+restore_funcs.js
+skills/
+
+# Large local spreadsheet export
+EMPLOYEE DATA.xlsx

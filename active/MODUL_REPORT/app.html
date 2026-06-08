@@ -1,0 +1,1622 @@
+<!-- html5-qrcode CDN -->
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+
+<div class="qr-overlay" id="qr-overlay" role="dialog" aria-modal="true" aria-labelledby="qr-title">
+  <div class="qr-header">
+    <h3 id="qr-title">Scan QR / Barcode</h3>
+    <p>Arahkan kamera ke QR Code atau Barcode kartu MK / NIK</p>
+  </div>
+  <div class="qr-viewport">
+    <div id="qr-reader"></div>
+  </div>
+  <div class="qr-result-text" id="qr-result-text"></div>
+  <div class="qr-loading" id="qr-loading"></div>
+  <div class="qr-diagnostic" id="qr-diagnostic"></div>
+  
+  <input type="file" id="qr-fallback-input" accept="image/*" capture="environment" style="display:none;" onchange="handleFallbackImage(event)">
+  <button class="qr-close-btn" id="qr-fallback-btn" type="button" style="background:#0077b6; margin-bottom:10px; display:none;" onclick="document.getElementById('qr-fallback-input').click()">📸 AMBIL FOTO</button>
+  <button class="qr-close-btn" id="qr-close-btn" data-action="close-qr" type="button">TUTUP</button>
+</div>
+
+<div class="scan-toast" id="scan-toast" role="status" aria-live="polite"></div>
+
+<script>
+// ── QR Scanner State ──────────────────────────────────────
+const QR = {
+  html5QrCode: null,
+  stream: null,
+  video: null,
+  detector: null,
+  scanFrame: null,
+  isScanning: false,
+  isStarting: false,
+  isStopping: false,
+  context: null,
+  usingNative: false,
+  successHandled: false
+};
+
+// ── State ──────────────────────────────────────────────────
+const STATE = {
+  currentUser: null,
+  masuk:    { selectedNIK: null, selectedNama: null, selectedType: null, selectedDept: null, selectedJabatan: null, scannedSerial: null, completed: false },
+  keluar:   { scannedSerial: null, bindingData: null },
+  security: { scannedSerial: null }
+};
+
+const REQUEST_BUSY = {
+  masukConfirm: false,
+  keluarScan: false,
+  keluarConfirm: false,
+  securityScan: false
+};
+
+const REPORT_CACHE = {
+  absen: null
+};
+
+const ROUTE_STATE = readRouteState();
+
+function readRouteState() {
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    return {
+      tab: String(params.get('tab') || '').trim(),
+      reportNik: String(params.get('reportNik') || '').trim(),
+      reportPeriodType: String(params.get('reportPeriodType') || '').trim(),
+      reportPeriodValue: String(params.get('reportPeriodValue') || '').trim(),
+      autoRun: params.get('autoRun') === '1',
+      absenApplied: false
+    };
+  } catch (_) {
+    return {
+      tab: '',
+      reportNik: '',
+      reportPeriodType: '',
+      reportPeriodValue: '',
+      autoRun: false,
+      absenApplied: false
+    };
+  }
+}
+
+function getIncomingSessionNik() {
+  if (typeof GLOBAL_SESSION_NIK === 'undefined') return '';
+  return String(GLOBAL_SESSION_NIK || '').trim();
+}
+
+function setLoginUiMode(mode, message) {
+  const loginPage = document.getElementById('page-login');
+  const loginForm = document.getElementById('login-form-content');
+  const sessionBootstrap = document.getElementById('session-bootstrap');
+  if (!loginPage || !loginForm || !sessionBootstrap) return;
+
+  if (mode === 'bootstrapping') {
+    loginPage.style.display = 'flex';
+    loginPage.classList.add('active');
+    loginForm.style.display = 'none';
+    sessionBootstrap.style.display = 'block';
+    sessionBootstrap.textContent = message || 'Memuat sesi dari Home Portal...';
+    return;
+  }
+
+  sessionBootstrap.style.display = 'none';
+  loginForm.style.display = 'block';
+  loginPage.style.display = 'flex';
+  loginPage.classList.add('active');
+}
+
+function hydrateAuthenticatedUser(user, depts) {
+  STATE.currentUser = user;
+  if (Array.isArray(depts) && depts.length) STATE.availableDepts = depts;
+
+  localStorage.setItem('dam_session', JSON.stringify(user));
+
+
+
+  STATE.masuk.selectedNIK = user.nik;
+  STATE.masuk.selectedNama = user.nama;
+  STATE.masuk.selectedType = user.type;
+  STATE.masuk.selectedDept = user.dept;
+  STATE.masuk.selectedJabatan = user.jabatan;
+  STATE.masuk.completed = false;
+
+  const inNik = document.getElementById('masuk-nik');
+  const inNama = document.getElementById('masuk-nama-input');
+  const inDept = document.getElementById('masuk-dept');
+  const inJabatan = document.getElementById('masuk-jabatan');
+  if (inNik) inNik.value = user.nik;
+  if (inNama) inNama.value = user.nama;
+  if (inDept) inDept.value = user.dept || '';
+  if (inJabatan) inJabatan.value = user.jabatan || '';
+
+  applyRolePermissions(user.role);
+  updateMasukScannerVisibility();
+}
+
+function restoreSavedSession() {
+  const savedSession = localStorage.getItem('dam_session');
+  if (!savedSession) return false;
+
+  try {
+    const user = JSON.parse(savedSession);
+    hydrateAuthenticatedUser(user, STATE.availableDepts);
+    return true;
+  } catch (e) {
+    localStorage.removeItem('dam_session');
+    return false;
+  }
+}
+
+function beginModuleAutoLogin(sessionNik) {
+  const nik = (sessionNik || getIncomingSessionNik()).trim();
+  if (!nik) return false;
+
+  STATE.authBootPending = true;
+  setLoginUiMode('bootstrapping', 'Memuat sesi dari Home Portal...');
+
+  google.script.run
+    .withFailureHandler(err => {
+      STATE.authBootPending = false;
+      if (!restoreSavedSession()) {
+        setLoginUiMode('login');
+        showScanToast('Gagal memverifikasi sesi: ' + getErrorMessage(err));
+      }
+    })
+    .withSuccessHandler(res => {
+      STATE.authBootPending = false;
+      if (res && res.ok) {
+        applyAuthenticatedSession(res);
+      } else if (!restoreSavedSession()) {
+        setLoginUiMode('login');
+        showScanToast((res && res.msg) || 'Sesi tidak valid.');
+      }
+    })
+    .verifySession(nik);
+
+  return true;
+}
+
+// ── AUTHENTICATION ─────────────────────────────────────────
+function applyRolePermissions(role) {
+  const TABS = {
+    'masuk': ['ADMINISTRATOR', 'SECURITY', 'KARYAWAN'],
+    'keluar': ['ADMINISTRATOR', 'SECURITY', 'KARYAWAN'],
+    'security': ['SECURITY', 'PENGAWAS'], 
+    'dashboard': ['ADMINISTRATOR', 'PENGAWAS'],
+    'cek-absen': ['ADMINISTRATOR', 'PENGAWAS', 'SECURITY', 'KARYAWAN'],
+    'cek-area': ['ADMINISTRATOR', 'PENGAWAS', 'SECURITY'],
+    'export-laporan': ['ADMINISTRATOR'],
+    'revisi-catatan': ['ADMINISTRATOR']
+  };
+
+  let defaultTab = null;
+  const validRoles = ['ADMINISTRATOR', 'PENGAWAS', 'SECURITY'];
+  const roleKey = validRoles.includes(role) ? role : 'KARYAWAN';
+
+  // Default tabs
+  if (roleKey === 'ADMINISTRATOR') defaultTab = 'dashboard';
+  else if (roleKey === 'PENGAWAS') defaultTab = 'cek-absen';
+  else if (roleKey === 'SECURITY') defaultTab = 'security';
+  else defaultTab = 'masuk';
+
+  if (ROUTE_STATE.tab && TABS[ROUTE_STATE.tab] && TABS[ROUTE_STATE.tab].includes(roleKey)) {
+    defaultTab = ROUTE_STATE.tab;
+  }
+
+  for (const tab in TABS) {
+    const btn = document.getElementById('tab-btn-' + tab);
+    if (TABS[tab].includes(roleKey)) {
+      if (btn) btn.style.display = 'flex';
+    } else {
+      if (btn) btn.style.display = 'none';
+    }
+  }
+
+  const userNameEl = document.getElementById('header-user-name');
+  if (userNameEl && STATE.currentUser) {
+    const firstName = (STATE.currentUser.nama || 'User').split(' ')[0];
+    userNameEl.textContent = firstName + ' (' + roleKey + ')';
+    
+    const absenNik = document.getElementById('cek-absen-nik');
+    if (absenNik && roleKey === 'KARYAWAN') {
+      absenNik.value = STATE.currentUser.nik;
+      absenNik.disabled = true;
+    }
+    
+    const masukSearch = document.getElementById('masuk-nik-input');
+    if (masukSearch) {
+      if (roleKey === 'KARYAWAN') {
+         masukSearch.disabled = true;
+         masukSearch.placeholder = "Pencarian dinonaktifkan khusus Karyawan";
+         masukSearch.style.backgroundColor = "#e9ecef";
+      } else {
+         masukSearch.disabled = false;
+         masukSearch.placeholder = "Masukkan NIK atau biarkan kosong";
+         masukSearch.style.backgroundColor = "";
+      }
+    }
+  }
+
+  // Switch to default tab
+  if (defaultTab) switchTab(defaultTab);
+  
+  // Show header and tab bar
+  document.getElementById('app-header').style.display = 'flex';
+  document.getElementById('app-tabbar').style.display = 'flex';
+  
+  // Hide login page
+  document.getElementById('page-login').classList.remove('active');
+  document.getElementById('page-login').style.display = 'none';
+}
+
+function handleLoginSubmit() {
+  const nik = (document.getElementById('login-nik').value || '').trim();
+  const pwd = (document.getElementById('login-password').value || '').trim();
+  
+  if (!nik) {
+    showScanToast("NIK wajib diisi.");
+    return;
+  }
+  
+  const btn = document.querySelector('.btn-login');
+  btn.classList.add('pulse-anim');
+  btn.innerHTML = 'MASUK...';
+  btn.disabled = true;
+  
+  google.script.run
+    .withFailureHandler(err => {
+      btn.disabled = false;
+      btn.classList.remove('pulse-anim');
+      btn.innerHTML = 'MASUK';
+      showScanToast('Error koneksi: ' + err.message);
+    })
+    .withSuccessHandler(res => {
+      btn.disabled = false;
+      btn.classList.remove('pulse-anim');
+      btn.innerHTML = 'MASUK';
+      if (!res.ok) {
+        showScanToast(res.msg);
+        return;
+      }
+      applyAuthenticatedSession(res);
+    })
+    .verifyLogin(nik, pwd);
+}
+
+function applyAuthenticatedSession(res) {
+  hydrateAuthenticatedUser(res.karyawan, res.depts);
+}
+
+// ── Tab switching ──────────────────────────────────────────
+async function switchTab(tab) {
+  const tabbar = document.getElementById('app-tabbar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (tabbar) tabbar.classList.remove('open');
+  if (overlay) overlay.classList.remove('active');
+
+  if (typeof QR !== 'undefined' && (QR.isScanning || QR.isStarting)) {
+    if (typeof stopQRScanner === 'function') await stopQRScanner();
+  }
+
+  const token = '?nik=' + (STATE.currentUser ? STATE.currentUser.nik : '');
+  
+  google.script.run.withSuccessHandler(urls => {
+    let targetUrl = '';
+    let isLocal = false;
+
+    if (tab === 'dashboard') {
+      if (document.getElementById('page-dashboard')) isLocal = true;
+      else targetUrl = urls.HOME_PORTAL;
+    } 
+    else if (tab === 'masuk' || tab === 'keluar') {
+      if (document.getElementById('page-masuk')) isLocal = true;
+      else targetUrl = urls.GATE_PABRIK;
+    }
+    else if (tab === 'security') {
+      if (document.getElementById('page-security')) isLocal = true;
+      else targetUrl = urls.AREA_KERJA;
+    }
+    else if (tab.includes('cek') || tab.includes('export')) {
+      if (document.getElementById('page-cek-absen')) isLocal = true;
+      else targetUrl = urls.REPORT;
+    }
+
+    if (isLocal) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      
+      const pageId = 'page-' + tab;
+      const btnId = 'tab-btn-' + tab;
+      if (document.getElementById(pageId)) document.getElementById(pageId).classList.add('active');
+      if (document.getElementById(btnId)) document.getElementById(btnId).classList.add('active');
+      
+      if (typeof resetAllSerialInputs === 'function') resetAllSerialInputs();
+      
+      const contexts = ['masuk', 'keluar', 'security'];
+      contexts.forEach(ctx => {
+        const resultEl = document.getElementById(ctx + '-result');
+        if (resultEl) { resultEl.className = 'result-card'; resultEl.innerHTML = ''; }
+      });
+
+      if (tab === 'dashboard' && typeof loadDashboard === 'function') loadDashboard();
+      if (tab === 'security' && typeof loadRecentLogs === 'function') loadRecentLogs();
+      if ((tab === 'cek-absen' || tab === 'cek-area') && typeof updatePeriodInput === 'function') updatePeriodInput();
+      if (tab === 'cek-absen') applyPendingAbsenRoute();
+    } 
+    else if (targetUrl) {
+      window.top.location.href = targetUrl + token;
+    } 
+    else {
+      alert('URL Module belum dikonfigurasi di CONFIG_MODUL!');
+    }
+  }).getModuleUrls();
+}
+
+// ── Debounce search ────────────────────────────────────────
+let searchTimer = null;
+function debounceSearch(q, context) {
+  clearTimeout(searchTimer);
+  if (q.length < 2) { closeList(context); return; }
+  searchTimer = setTimeout(() => doSearch(q, context), 400);
+}
+
+function doSearch(q, context) {
+  google.script.run
+    .withFailureHandler(err => handleGasFailure(context, err))
+    .withSuccessHandler(res => renderList(res, context))
+    .searchKaryawan(q);
+}
+
+function renderList(res, context) {
+  const list = document.getElementById(context + '-list');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!res.ok) { showResult(context, 'error', 'Gagal mencari karyawan: ' + escHtml(res.msg)); return; }
+  if (!res.data.length) { list.style.display='none'; return; }
+
+  res.data.forEach(k => {
+    const item = document.createElement('div');
+    const name = document.createElement('div');
+    const detail = document.createElement('div');
+    item.className = 'autocomplete-item';
+    name.textContent = k.nama || '-';
+    detail.className = 'item-nik';
+    detail.textContent = `${k.nik || '-'} - ${k.dept || '-'} - ${k.jabatan || '-'}`;
+    item.addEventListener('click', () => selectKaryawan(context, k.nik || '', k.nama || '', k.type || '', k.dept || '', k.jabatan || ''));
+    item.appendChild(name);
+    item.appendChild(detail);
+    list.appendChild(item);
+  });
+  list.style.display = 'block';
+}
+
+function closeList(context) {
+  const el = document.getElementById(context + '-list');
+  if (el) el.style.display = 'none';
+}
+
+function selectKaryawan(context, nik, nama, type, dept, jabatan) {
+  STATE[context].selectedNIK     = nik;
+  STATE[context].selectedNama    = nama;
+  STATE[context].selectedType    = type;
+  STATE[context].selectedDept    = dept;
+  STATE[context].selectedJabatan = jabatan;
+  if (context === 'masuk') STATE.masuk.completed = false;
+
+  const searchInput = document.getElementById(context + '-search') || document.getElementById(context + '-nik-input');
+  if (searchInput) searchInput.value = nama + ' (' + nik + ')';
+  const nikInput = document.getElementById(context + '-nik');
+  const namaInput = document.getElementById(context + '-nama-input');
+  const deptInput = document.getElementById(context + '-dept');
+  const jabatanInput = document.getElementById(context + '-jabatan');
+  if (nikInput) nikInput.value = nik;
+  if (namaInput) namaInput.value = nama;
+  if (deptInput) deptInput.value = dept || '';
+  if (jabatanInput) jabatanInput.value = jabatan || '';
+  closeList(context);
+
+  const info = document.getElementById(context + '-karyawan-info');
+  if (info) {
+    document.getElementById(context + '-avatar').textContent = nama.charAt(0);
+    document.getElementById(context + '-nama').textContent   = nama;
+    document.getElementById(context + '-detail').textContent = nik + ' - ' + dept + ' - ' + jabatan;
+    document.getElementById(context + '-type').textContent   = type || 'KARYAWAN';
+    info.style.display = 'block';
+  }
+
+  updateMasukScannerVisibility();
+}
+
+// ── Manual serial submit ────────────────────────────────────
+function submitSerial(context) {
+  const val = normalizeSerial(document.getElementById(context + '-serial').value);
+  if (!val) { showResult(context, 'error', 'Masukkan nomor kartu MK / NIK terlebih dahulu.'); return; }
+  if (!isValidSerial(val)) { showResult(context, 'error', 'Format nomor kartu MK / NIK tidak valid.'); return; }
+  onSerialScanned(context, val);
+}
+
+// ── On serial received (NFC or manual) ────────────────────
+function onSerialScanned(context, serial) {
+  serial = normalizeSerial(serial);
+  if (!isValidSerial(serial)) {
+    showResult(context, 'error', 'Format nomor kartu MK / NIK tidak valid.');
+    return;
+  }
+  document.getElementById(context + '-serial').value = serial;
+
+  if (context === 'masuk') {
+    STATE.masuk.completed = false;
+    STATE.masuk.scannedSerial = serial;
+    const display = document.getElementById('masuk-card-display');
+    document.getElementById('masuk-card-num').textContent = serial;
+    display.style.display = 'block';
+    checkMasukReady();
+    if (STATE.masuk.selectedNIK) {
+      confirmMasuk(); // Auto submit if NIK is already selected
+    }
+
+  } else if (context === 'keluar') {
+    if (REQUEST_BUSY.keluarScan) return;
+    REQUEST_BUSY.keluarScan = true;
+    STATE.keluar.scannedSerial = serial;
+    showResult('keluar', 'warning', 'Memeriksa kartu...');
+    google.script.run
+      .withFailureHandler(err => {
+        REQUEST_BUSY.keluarScan = false;
+        handleGasFailure('keluar', err);
+      })
+      .withSuccessHandler(res => handleKeluarScan(res, serial))
+      .getBindingStatus(serial);
+
+  } else if (context === 'security') {
+    const dept = '';
+    
+    const reasonRadio = document.querySelector('input[name="security_reason"]:checked');
+    const reason = reasonRadio ? reasonRadio.value : '';
+    
+    const modeRadio = document.querySelector('input[name="security_mode"]:checked');
+    const forceMode = modeRadio ? modeRadio.value : 'AUTO';
+    
+    if (REQUEST_BUSY.securityScan) return;
+    REQUEST_BUSY.securityScan = true;
+    STATE.security.scannedSerial = serial;
+    showResult('security', 'warning', 'Mencatat...');
+    google.script.run
+      .withFailureHandler(err => {
+        REQUEST_BUSY.securityScan = false;
+        handleGasFailure('security', err);
+      })
+      .withSuccessHandler(handleSecurityScan)
+      .scanAreaKerja(serial, dept, reason, forceMode);
+  }
+}
+
+// ── MASUK: Check ready & confirm ───────────────────────────
+function isExternalUser(type, jabatan, dept) {
+  const marker = [type, jabatan, dept].join(' ').toUpperCase();
+  return ['MITRA', 'VISITOR', 'TAMU', 'EXTERNAL', 'EKSTERNAL', 'VENDOR', 'KONTRAKTOR', 'OUTSOURCE', 'OUTSOURCING']
+    .some(keyword => marker.includes(keyword));
+}
+
+function isInternalUser(type, jabatan, dept) {
+  return !isExternalUser(type, jabatan, dept);
+}
+
+function updateMasukScannerVisibility() {
+  const s = STATE.masuk;
+  const card = document.getElementById('masuk-scanner-card');
+  if (card) {
+    const isInternal = isInternalUser(s.selectedType, s.selectedJabatan, s.selectedDept);
+    card.style.display = isInternal ? 'none' : 'block';
+  }
+  checkMasukReady();
+}
+
+function checkMasukReady() {
+  const s = STATE.masuk;
+  const btn = document.getElementById('masuk-confirm');
+  if (!btn) return;
+  const internal = isInternalUser(s.selectedType, s.selectedJabatan, s.selectedDept);
+  if (!s.completed && s.selectedNIK && (internal || s.scannedSerial)) {
+    btn.classList.add('visible');
+  } else {
+    btn.classList.remove('visible');
+  }
+}
+
+function confirmMasuk() {
+  if (REQUEST_BUSY.masukConfirm) return;
+  const s = STATE.masuk;
+  const internal = isInternalUser(s.selectedType, s.selectedJabatan, s.selectedDept);
+  
+  if (!s.selectedNIK) return;
+  if (!internal && !s.scannedSerial) return;
+
+  const loker = (document.getElementById('masuk-loker').value || '').trim();
+  const serialToSend = internal ? s.selectedNIK : s.scannedSerial;
+
+  REQUEST_BUSY.masukConfirm = true;
+  setActionBusy('confirm-masuk', true);
+  showResult('masuk', 'warning', 'Memproses...');
+  document.getElementById('masuk-confirm').classList.remove('visible');
+
+  google.script.run
+    .withFailureHandler(err => {
+      REQUEST_BUSY.masukConfirm = false;
+      setActionBusy('confirm-masuk', false);
+      handleGasFailure('masuk', err);
+      document.getElementById('masuk-confirm').classList.add('visible');
+    })
+    .withSuccessHandler(res => {
+      REQUEST_BUSY.masukConfirm = false;
+      setActionBusy('confirm-masuk', false);
+      if (res.ok) {
+        showResult('masuk', 'success',
+          `<strong>${escHtml(res.karyawan.nama)}</strong> berhasil masuk pabrik.<br>
+           <span class="meta">Kartu: ${escHtml(res.noKartuMK)} - ${escHtml(res.waktu)} - ${escHtml(res.shift)}</span>`);
+        resetMasuk();
+      } else {
+        if (res.htmlMsg) {
+          showResult('masuk', 'error', res.htmlMsg);
+        } else {
+          showResult('masuk', 'error', escHtml(res.msg));
+        }
+        document.getElementById('masuk-confirm').classList.add('visible');
+      }
+    })
+    .bindKartu(serialToSend, s.selectedNIK, loker);
+}
+
+function resetMasuk() {
+  STATE.masuk.scannedSerial = null;
+  STATE.masuk.completed = true;
+  const serialIn = document.getElementById('masuk-serial');
+  if (serialIn) serialIn.value = '';
+  const lokerIn = document.getElementById('masuk-loker');
+  if (lokerIn) lokerIn.value = '';
+  const confirmBtn = document.getElementById('masuk-confirm');
+  if (confirmBtn) confirmBtn.classList.remove('visible');
+  updateMasukScannerVisibility();
+}
+
+function resetKeluarUi() {
+  const confirmEl = document.getElementById('keluar-confirm');
+  if (confirmEl) confirmEl.classList.remove('visible');
+
+  const avatar = document.getElementById('keluar-avatar');
+  const nama = document.getElementById('keluar-nama');
+  const detail = document.getElementById('keluar-detail');
+
+  if (avatar) avatar.textContent = '?';
+  if (nama) nama.textContent = '-';
+  if (detail) detail.textContent = '-';
+  
+  const lokerIn = document.getElementById('keluar-loker');
+  if (lokerIn) lokerIn.value = '';
+}
+
+// ── KELUAR: Handle scan & confirm ──────────────────────────
+function handleKeluarScan(res, serial) {
+  REQUEST_BUSY.keluarScan = false;
+  if (!res.ok) {
+    showResult('keluar', 'error', escHtml(res.msg));
+    const serialInput = document.getElementById('keluar-serial');
+    if (serialInput) serialInput.value = '';
+    STATE.keluar.scannedSerial = null;
+    STATE.keluar.bindingData = null;
+    resetKeluarUi();
+    return;
+  }
+  if (res.status !== 'BOUND') {
+    showResult('keluar', 'error', `Kartu <strong>${escHtml(serial)}</strong> tidak dalam status terikat / tidak dikenal.`);
+    const serialInput = document.getElementById('keluar-serial');
+    if (serialInput) serialInput.value = '';
+    STATE.keluar.scannedSerial = null;
+    STATE.keluar.bindingData = null;
+    resetKeluarUi();
+    return;
+  }
+
+  STATE.keluar.bindingData = res;
+
+  showResult('keluar', 'warning',
+    `Kartu <strong>${escHtml(serial)}</strong> terikat ke <strong>${escHtml(res.nama)}</strong>.<br>
+     <span class="meta">NIK: ${escHtml(res.nik)} - ${escHtml(res.dept)} - Terikat sejak: ${escHtml(res.waktuBind)}</span><br><br>
+     Konfirmasi jika karyawan ini akan pulang.`);
+
+  document.getElementById('keluar-avatar').textContent  = res.nama.charAt(0);
+  document.getElementById('keluar-nama').textContent    = res.nama;
+  document.getElementById('keluar-detail').textContent  = res.nik + ' - ' + res.dept;
+
+  document.getElementById('keluar-confirm').classList.add('visible');
+}
+
+function confirmKeluar() {
+  if (REQUEST_BUSY.keluarConfirm) return;
+  const serial = STATE.keluar.scannedSerial;
+  if (!serial) return;
+  
+  const loker = (document.getElementById('keluar-loker').value || '').trim();
+  
+  REQUEST_BUSY.keluarConfirm = true;
+  setActionBusy('confirm-keluar', true);
+  showResult('keluar', 'warning', 'Memproses...');
+  document.getElementById('keluar-confirm').classList.remove('visible');
+
+  google.script.run
+    .withFailureHandler(err => {
+      REQUEST_BUSY.keluarConfirm = false;
+      setActionBusy('confirm-keluar', false);
+      handleGasFailure('keluar', err);
+      document.getElementById('keluar-confirm').classList.add('visible');
+    })
+    .withSuccessHandler(res => {
+      REQUEST_BUSY.keluarConfirm = false;
+      setActionBusy('confirm-keluar', false);
+      if (res.ok) {
+        showResult('keluar', 'success',
+          `<strong>${escHtml(res.karyawan.nama)}</strong> telah keluar pabrik.<br>
+           <span class="meta">Kartu ${escHtml(res.noKartuMK)} telah dilepas - ${escHtml(res.waktu)}</span>`);
+        STATE.keluar = { scannedSerial:null, bindingData:null };
+        document.getElementById('keluar-serial').value = '';
+        resetKeluarUi();
+      } else {
+        showResult('keluar', 'error', escHtml(res.msg));
+        document.getElementById('keluar-confirm').classList.add('visible');
+      }
+    })
+    .releaseKartu(serial, loker);
+}
+
+// ── SECURITY: Handle scan ──────────────────────────────────
+function handleSecurityScan(res) {
+  REQUEST_BUSY.securityScan = false;
+  if (!res.ok) {
+    showResult('security', 'error', escHtml(res.msg));
+    const serialInput = document.getElementById('security-serial');
+    if (serialInput) serialInput.value = '';
+    STATE.security.scannedSerial = null;
+  } else {
+    const statusLabel = res.inout === 'IN' ? 'MASUK' : 'KELUAR';
+    const color = res.inout === 'IN' ? 'success' : 'warning';
+    showResult('security', color,
+      `<strong>${escHtml(res.karyawan.nama)}</strong><br>
+       <span class="meta">${escHtml(res.karyawan.nik)} - ${escHtml(res.karyawan.dept)} - ${escHtml(res.karyawan.jabatan)}</span><br>
+       <span class="meta">Kartu: ${escHtml(res.noKartuMK)} - ${escHtml(res.waktu)}</span><br>
+       <strong style="font-size:16px">${statusLabel} Area Kerja</strong>`);
+    document.getElementById('security-serial').value = '';
+    STATE.security.scannedSerial = null;
+    setTimeout(loadRecentLogs, 800);
+  }
+}
+
+// ── DASHBOARD ──────────────────────────────────────────────
+function loadDashboard() {
+  document.getElementById('db-bound').textContent      = '...';
+  document.getElementById('db-log-today').textContent  = '...';
+  document.getElementById('db-bound-list').innerHTML   = '<div class="skeleton-block skeleton-loader"></div><div class="skeleton-block skeleton-loader"></div>';
+
+  google.script.run
+    .withFailureHandler(err => {
+      document.getElementById('db-bound').textContent = '-';
+      document.getElementById('db-log-today').textContent = '-';
+      document.getElementById('db-bound-list').innerHTML = `<div class="loading">Gagal memuat dashboard: ${escHtml(getErrorMessage(err))}</div>`;
+    })
+    .withSuccessHandler(res => {
+      if (!res.ok) {
+        document.getElementById('db-bound').textContent = '-';
+        document.getElementById('db-log-today').textContent = '-';
+        document.getElementById('db-bound-list').innerHTML = `<div class="loading">Gagal memuat dashboard: ${escHtml(res.msg)}</div>`;
+        return;
+      }
+      document.getElementById('db-bound').textContent     = res.totalBound;
+      document.getElementById('db-log-today').textContent = res.logAreaKerjaHariIni;
+
+      const list = document.getElementById('db-bound-list');
+      if (!res.boundList.length) {
+        list.innerHTML = '<div class="loading">Tidak ada karyawan di dalam pabrik</div>';
+        return;
+      }
+      list.innerHTML = res.boundList.map(k => `
+        <div class="log-item">
+          <div class="log-dot in" style="background:#e8f4fb">
+            <span style="font-weight:800;color:#0077B6">${k.nama.charAt(0)}</span>
+          </div>
+          <div class="log-info">
+            <strong>${escHtml(k.nama)}</strong>
+            <span>${k.nik} - ${escHtml(k.dept)} - Kartu: ${k.noKartuMK}</span>
+          </div>
+          <div class="log-time">${k.waktuBind ? k.waktuBind.split(' ')[1] || '' : ''}</div>
+        </div>`).join('');
+    })
+    .getDashboardData();
+}
+
+// ── RECENT LOGS ────────────────────────────────────────────
+function loadRecentLogs() {
+  google.script.run
+    .withFailureHandler(err => {
+      const el = document.getElementById('security-log-list');
+      if (el) el.innerHTML = `<div class="loading">Gagal memuat log: ${escHtml(getErrorMessage(err))}</div>`;
+    })
+    .withSuccessHandler(res => {
+      const el = document.getElementById('security-log-list');
+      if (!res.ok) {
+        el.innerHTML = `<div class="loading">Gagal memuat log: ${escHtml(res.msg)}</div>`;
+        return;
+      }
+      if (!res.data.length) {
+        el.innerHTML = '<div class="loading">Belum ada log hari ini</div>';
+        return;
+      }
+      el.innerHTML = res.data.map(l => `
+        <div class="log-item">
+          <div class="log-dot ${l.inout === 'IN' ? 'in' : 'out'}">
+            ${l.inout === 'IN' ? 'IN' : 'OUT'}
+          </div>
+          <div class="log-info">
+            <strong>${escHtml(l.nama)}</strong>
+            <span>${l.noKartuMK} - ${l.nik}</span>
+          </div>
+          <div class="log-time">${l.jam}<br><span style="font-size:10px">${l.tanggal}</span></div>
+        </div>`).join('');
+    })
+    .getRecentAreaLogs(20);
+}
+
+// ── HELPERS ────────────────────────────────────────────────
+function updatePeriodInput(target) {
+  const typeEl = document.getElementById(target + '-period-type');
+  const valueEl = document.getElementById(target + '-period-value');
+  if (!typeEl || !valueEl) return;
+
+  valueEl.type = typeEl.value;
+  valueEl.value = getDefaultPeriodValue(typeEl.value);
+}
+
+function getDefaultPeriodValue(type) {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  if (type === 'date') return `${yyyy}-${mm}-${dd}`;
+  if (type === 'month') return `${yyyy}-${mm}`;
+  if (type === 'week') return getIsoWeekValue(now);
+  return '';
+}
+
+function getIsoWeekValue(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+function processAbsenReport() {
+  const nik = normalizeSerial(document.getElementById('cek-absen-nik').value);
+  const periodType = document.getElementById('cek-absen-period-type').value;
+  const periodValue = document.getElementById('cek-absen-period-value').value;
+  const list = document.getElementById('cek-absen-list');
+  const exportBtn = document.getElementById('cek-absen-export');
+
+  REPORT_CACHE.absen = null;
+  if (exportBtn) exportBtn.disabled = true;
+  const role = STATE.currentUser ? STATE.currentUser.role : '';
+  const deptFilter = role === 'PENGAWAS' ? STATE.currentUser.dept : '';
+  
+  if (!nik && !deptFilter) { showResult('cek-absen', 'error', 'Masukkan NIK terlebih dahulu.'); return; }
+  if (!periodValue) { showResult('cek-absen', 'error', 'Pilih periode terlebih dahulu.'); return; }
+
+  showResult('cek-absen', 'warning', 'Memproses data absen...');
+  list.innerHTML = '<div class="skeleton-block skeleton-loader"></div><div class="skeleton-block skeleton-loader"></div><div class="skeleton-block skeleton-loader"></div>';
+  const slowTimer = window.setTimeout(() => {
+    showResult('cek-absen', 'warning', 'Data absen cukup besar, sistem masih memproses. Mohon tunggu sebentar...');
+  }, 8000);
+
+  google.script.run
+    .withFailureHandler(err => {
+      window.clearTimeout(slowTimer);
+      handleGasFailure('cek-absen', err);
+      list.innerHTML = '<div class="loading">Gagal memuat catatan absen.</div>';
+    })
+    .withSuccessHandler(res => {
+      window.clearTimeout(slowTimer);
+      renderAbsenReport(res);
+    })
+    .getAbsenReport(nik, deptFilter, periodType, periodValue);
+}
+
+function applyPendingAbsenRoute() {
+  if (ROUTE_STATE.absenApplied || ROUTE_STATE.tab !== 'cek-absen') return;
+
+  const nikInput = document.getElementById('cek-absen-nik');
+  const periodTypeInput = document.getElementById('cek-absen-period-type');
+  const periodValueInput = document.getElementById('cek-absen-period-value');
+
+  if (nikInput && ROUTE_STATE.reportNik) nikInput.value = ROUTE_STATE.reportNik;
+  if (periodTypeInput && ROUTE_STATE.reportPeriodType) {
+    periodTypeInput.value = ROUTE_STATE.reportPeriodType;
+    updatePeriodInput('cek-absen');
+  }
+  if (periodValueInput && ROUTE_STATE.reportPeriodValue) periodValueInput.value = ROUTE_STATE.reportPeriodValue;
+
+  ROUTE_STATE.absenApplied = true;
+  if (ROUTE_STATE.autoRun) {
+    window.setTimeout(() => processAbsenReport(), 120);
+  }
+}
+
+function renderAbsenReport(res) {
+  const list = document.getElementById('cek-absen-list');
+  const exportBtn = document.getElementById('cek-absen-export');
+  if (!res.ok) {
+    REPORT_CACHE.absen = null;
+    if (exportBtn) exportBtn.disabled = true;
+    showResult('cek-absen', 'error', escHtml(res.msg));
+    list.innerHTML = '<div class="loading">Data tidak dapat ditampilkan.</div>';
+    return;
+  }
+  REPORT_CACHE.absen = res;
+  if (exportBtn) exportBtn.disabled = !res.data.length;
+  showResult('cek-absen', 'success', `Periode ${escHtml(res.period)} - ${res.total} catatan`);
+  
+  const role = STATE.currentUser ? STATE.currentUser.role : 'KARYAWAN';
+  const isKaryawan = role === 'KARYAWAN' || role === 'Karyawan';
+  
+  let tableHeader = '';
+  if (isKaryawan) {
+    tableHeader = `<tr><th>Nama</th><th>Tanggal</th><th>Jam Masuk</th><th>Jam Keluar</th><th>No Kartu</th><th>No Loker</th></tr>`;
+  } else {
+    tableHeader = `<tr><th>Nama</th><th>NIK</th><th>Departemen</th><th>Tanggal</th><th>Jam Masuk</th><th>Jam Keluar</th><th>Status</th></tr>`;
+  }
+
+  let tableRows = '';
+  if (!res.data.length) {
+    const colSpan = isKaryawan ? 6 : 7;
+    tableRows = `<tr><td colspan="${colSpan}" class="text-center" style="padding: 24px; color: #777;">Tidak ada catatan absen untuk NIK dan periode ini.</td></tr>`;
+  } else {
+    tableRows = res.data.map(row => {
+      if (isKaryawan) {
+        return `<tr>
+          <td>${escHtml(row.nama || row.nik)}</td>
+          <td>${escHtml(row.tanggal)}</td>
+          <td>${escHtml(row.jamMasuk || '-')}</td>
+          <td>${escHtml(row.jamKeluar || '-')}</td>
+          <td>${escHtml(row.noKartuMK || '-')}</td>
+          <td>${escHtml(row.noLoker || '-')}</td>
+        </tr>`;
+      } else {
+        return `<tr>
+          <td>${escHtml(row.nama || row.nik)}</td>
+          <td>${escHtml(row.nik)}</td>
+          <td>${escHtml(row.dept || '-')}</td>
+          <td>${escHtml(row.tanggal)}</td>
+          <td>${escHtml(row.jamMasuk || '-')}</td>
+          <td>${escHtml(row.jamKeluar || '-')}</td>
+          <td><span class="badge ${row.status === 'SELESAI' ? 'bg-secondary' : 'bg-success'}">${escHtml(row.status || '-')}</span></td>
+        </tr>`;
+      }
+    }).join('');
+  }
+
+  list.innerHTML = `
+    <div class="report-summary">
+      <div class="summary-box"><strong>${res.total}</strong><span>Total</span></div>
+      <div class="summary-box"><strong>${res.complete}</strong><span>Selesai</span></div>
+      <div class="summary-box"><strong>${res.active}</strong><span>Aktif</span></div>
+    </div>
+    <div class="table-responsive mt-3">
+      <table class="table table-bordered table-striped table-hover align-middle">
+        <thead class="table-dark">
+          ${tableHeader}
+        </thead>
+        <tbody>
+          ${tableRows}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function exportAbsenReport() {
+  const report = REPORT_CACHE.absen;
+  if (!report || !report.data || !report.data.length) {
+    showResult('cek-absen', 'error', 'Tidak ada data absen untuk diexport. Klik PROSES terlebih dahulu.');
+    return;
+  }
+
+  const rows = [
+    ['PERIODE', report.period],
+    ['TOTAL', report.total],
+    [],
+    ['TANGGAL', 'NIK', 'NAMA', 'DEPARTEMEN', 'JABATAN', 'JAM MASUK', 'JAM KELUAR', 'STATUS']
+  ];
+
+  report.data.forEach(row => {
+    rows.push([
+      row.tanggal || '',
+      row.nik || '',
+      row.nama || '',
+      row.dept || '',
+      row.jabatan || '',
+      row.jamMasuk || '',
+      row.jamKeluar || '',
+      row.status || ''
+    ]);
+  });
+
+  const csv = rows.map(row => row.map(csvCell).join(',')).join('\r\n');
+  const nik = normalizeSerial(document.getElementById('cek-absen-nik').value) || 'NIK';
+  const periodValue = document.getElementById('cek-absen-period-value').value || 'PERIODE';
+  downloadTextFile(`absen_${nik}_${periodValue}.csv`, '\ufeff' + csv, 'text/csv;charset=utf-8');
+}
+
+function csvCell(value) {
+  const text = (value === null || value === undefined) ? '' : String(value);
+  return '"' + text.replace(/"/g, '""') + '"';
+}
+
+function downloadTextFile(filename, content, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+    link.remove();
+  }, 1000);
+}
+
+function processAreaReport() {
+  const nik = normalizeSerial(document.getElementById('cek-area-nik').value);
+  const periodType = document.getElementById('cek-area-period-type').value;
+  const periodValue = document.getElementById('cek-area-period-value').value;
+  const list = document.getElementById('cek-area-list');
+
+  const role = STATE.currentUser ? STATE.currentUser.role : '';
+  const deptFilter = role === 'PENGAWAS' ? STATE.currentUser.dept : '';
+  
+  if (!nik && !deptFilter) { showResult('cek-area', 'error', 'Masukkan NIK terlebih dahulu.'); return; }
+  if (!periodValue) { showResult('cek-area', 'error', 'Pilih periode terlebih dahulu.'); return; }
+
+  showResult('cek-area', 'warning', 'Memproses data aktivitas...');
+  list.innerHTML = '<div class="skeleton-block skeleton-loader"></div><div class="skeleton-block skeleton-loader"></div><div class="skeleton-block skeleton-loader"></div>';
+
+  google.script.run
+    .withFailureHandler(err => {
+      handleGasFailure('cek-area', err);
+      list.innerHTML = '<div class="loading">Gagal memuat catatan aktivitas.</div>';
+    })
+    .withSuccessHandler(renderAreaReport)
+    .getAreaActivityReport(nik, deptFilter, periodType, periodValue);
+}
+
+function renderAreaReport(res) {
+  const list = document.getElementById('cek-area-list');
+  const rekapList = document.getElementById('cek-area-rekap-list');
+  
+  if (!res.ok) {
+    showResult('cek-area', 'error', escHtml(res.msg));
+    list.innerHTML = '<div class="loading">Data tidak dapat ditampilkan.</div>';
+    if(rekapList) rekapList.innerHTML = '';
+    return;
+  }
+  showResult('cek-area', 'success', `Periode ${escHtml(res.period)} - ${res.total} catatan`);
+  
+  // 1. RENDER LOG TIMESTAMP
+  list.innerHTML = `
+    <div class="report-summary">
+      <div class="summary-box"><strong>${res.total}</strong><span>Total</span></div>
+      <div class="summary-box"><strong>${res.inCount}</strong><span>Masuk</span></div>
+      <div class="summary-box"><strong>${res.outCount}</strong><span>Keluar</span></div>
+    </div>
+    ${res.data.length === 0 
+      ? '<div class="loading" style="margin-top:20px;">Tidak ada catatan aktivitas untuk NIK dan periode ini.</div>' 
+      : res.data.map(row => `
+      <div class="report-row">
+        <div class="report-date">${escHtml(row.tanggal)}<br><span>${escHtml(row.jam)}</span></div>
+        <div class="report-main">
+          <strong>${row.inout === 'IN' ? 'MASUK Area Kerja' : 'KELUAR Area Kerja'}</strong>
+          <span>${escHtml(row.nama || row.nik)} - ${escHtml(row.nik)}</span>
+          <span>${escHtml(row.dept || '-')} - ${escHtml(row.jabatan || '-')}</span>
+          <span>Area: ${escHtml(row.tujuan || '-')} - Catatan: ${escHtml(row.catatan || '-')}</span>
+          <div class="time-pair">
+            <span class="time-pill ${row.inout === 'OUT' ? 'out' : ''}">${escHtml(row.inout)}</span>
+            <span class="time-pill">Kartu ${escHtml(row.noKartuMK || '-')}</span>
+          </div>
+        </div>
+      </div>`).join('')}
+  `;
+
+  // 2. RENDER REKAP HITUNGAN
+  if (rekapList) {
+    let tableRows = '';
+    
+    if (!res.data.length) {
+      tableRows = '<tr><td colspan="5" class="text-center" style="padding: 24px; color: #777;">Tidak ada data untuk direkap.</td></tr>';
+    } else {
+      const recapMap = {};
+      res.data.forEach(row => {
+        const id = row.nik || 'UNKNOWN';
+        if (!recapMap[id]) {
+          recapMap[id] = { nik: id, nama: row.nama, dept: row.dept, in: 0, out: 0, total: 0 };
+        }
+        recapMap[id].total++;
+        if (row.inout === 'IN') recapMap[id].in++;
+        else recapMap[id].out++;
+      });
+
+      const recapArr = Object.values(recapMap).sort((a,b) => b.total - a.total);
+      
+      tableRows = recapArr.map(r => `
+        <tr>
+          <td>${escHtml(r.nama || r.nik)}</td>
+          <td>${escHtml(r.nik)}</td>
+          <td><span class="badge bg-primary" style="font-size:14px; padding:6px 10px;">${r.total}x</span></td>
+          <td><span class="badge bg-success" style="font-size:13px;">${r.in} Masuk</span></td>
+          <td><span class="badge bg-warning text-dark" style="font-size:13px;">${r.out} Keluar</span></td>
+        </tr>
+      `).join('');
+    }
+
+    rekapList.innerHTML = `
+      <div class="table-responsive mt-2">
+        <table class="table table-bordered table-striped table-hover align-middle">
+          <thead class="table-dark">
+            <tr>
+              <th>Nama Karyawan</th>
+              <th>NIK</th>
+              <th>Total Aktivitas</th>
+              <th>IN</th>
+              <th>OUT</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+}
+
+function showResult(context, type, html) {
+  const el = document.getElementById(context + '-result');
+  if (!el) return;
+  el.className = 'result-card ' + type;
+  el.innerHTML = html;
+}
+
+function escHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function getErrorMessage(err) {
+  return (err && (err.message || err.toString())) || 'Terjadi kesalahan koneksi.';
+}
+
+function handleGasFailure(context, err) {
+  showResult(context, 'error', 'Gagal menghubungi server: ' + escHtml(getErrorMessage(err)));
+}
+
+function setActionBusy(action, isBusy) {
+  document.querySelectorAll(`[data-action="${action}"]`).forEach(el => {
+    el.disabled = isBusy;
+    el.setAttribute('aria-busy', isBusy ? 'true' : 'false');
+    if (isBusy) {
+      if (!el.dataset.originalHtml) el.dataset.originalHtml = el.innerHTML;
+      el.classList.add('pulse-anim');
+      el.innerHTML = 'Memproses...';
+    } else {
+      el.classList.remove('pulse-anim');
+      if (el.dataset.originalHtml) el.innerHTML = el.dataset.originalHtml;
+    }
+  });
+}
+
+function normalizeSerial(value) {
+  return (value || '').toString().trim().toUpperCase().replace(/\s+/g, '');
+}
+
+function isValidSerial(value) {
+  return /^[A-Z0-9_-]{3,32}$/.test(value || '');
+}
+
+function resetSerialInput(context) {
+  const input = document.getElementById(context + '-serial');
+  const result = document.getElementById(context + '-result');
+  if (input) input.value = '';
+  if (result) {
+    result.className = 'result-card';
+    result.innerHTML = '';
+  }
+
+  if (context === 'masuk') {
+    STATE.masuk.scannedSerial = null;
+    const display = document.getElementById('masuk-card-display');
+    const cardNum = document.getElementById('masuk-card-num');
+    if (display) display.style.display = 'none';
+    if (cardNum) cardNum.textContent = '-';
+    checkMasukReady();
+  } else if (context === 'keluar') {
+    STATE.keluar.scannedSerial = null;
+    STATE.keluar.bindingData = null;
+    resetKeluarUi();
+  } else if (context === 'security') {
+    STATE.security.scannedSerial = null;
+  }
+}
+
+function resetAllSerialInputs() {
+  ['masuk', 'keluar', 'security'].forEach(resetSerialInput);
+}
+
+function forceClearSerialInputs() {
+  ['masuk', 'keluar', 'security'].forEach(context => {
+    const input = document.getElementById(context + '-serial');
+    if (input) {
+      input.value = '';
+      input.setAttribute('value', '');
+    }
+  });
+}
+
+function batchQRDom(update) {
+  window.requestAnimationFrame(() => update({
+    overlay: document.getElementById('qr-overlay'),
+    reader: document.getElementById('qr-reader'),
+    result: document.getElementById('qr-result-text'),
+    loading: document.getElementById('qr-loading'),
+    diagnostic: document.getElementById('qr-diagnostic')
+  }));
+}
+
+function setQRDiagnostic(message) {
+  const diagnostic = document.getElementById('qr-diagnostic');
+  if (!diagnostic) return;
+  diagnostic.textContent = message || '';
+  diagnostic.classList.toggle('visible', Boolean(message));
+}
+
+function waitForVisibleScanner() {
+  return new Promise(resolve => {
+    const reader = document.getElementById('qr-reader');
+    const check = () => {
+      const rect = reader.getBoundingClientRect();
+      if (rect.width > 0 && rect.height >= 250) {
+        resolve();
+        return;
+      }
+      window.requestAnimationFrame(check);
+    };
+    window.requestAnimationFrame(check);
+  });
+}
+
+function getScannerFormats() {
+  if (typeof Html5QrcodeSupportedFormats === 'undefined') return undefined;
+  return [
+    Html5QrcodeSupportedFormats.QR_CODE,
+    Html5QrcodeSupportedFormats.CODE_128,
+    Html5QrcodeSupportedFormats.CODE_39,
+    Html5QrcodeSupportedFormats.EAN_8,
+    Html5QrcodeSupportedFormats.EAN_13
+  ].filter(format => format !== undefined);
+}
+
+function getNativeBarcodeFormats() {
+  return ['qr_code', 'code_128', 'code_39', 'ean_8', 'ean_13'];
+}
+
+async function getCameraPermissionState() {
+  if (!navigator.permissions || !navigator.permissions.query) return 'unknown';
+  try {
+    const status = await navigator.permissions.query({ name: 'camera' });
+    return status.state || 'unknown';
+  } catch(err) {
+    return 'unknown';
+  }
+}
+
+function getCameraPolicyState() {
+  try {
+    if (document.permissionsPolicy && document.permissionsPolicy.allowsFeature) {
+      return document.permissionsPolicy.allowsFeature('camera') ? 'allowed' : 'blocked';
+    }
+    if (document.featurePolicy && document.featurePolicy.allowsFeature) {
+      return document.featurePolicy.allowsFeature('camera') ? 'allowed' : 'blocked';
+    }
+  } catch(err) {
+    return 'unknown';
+  }
+  return 'unknown';
+}
+
+function isTopWindow() {
+  try {
+    return window.self === window.top;
+  } catch(err) {
+    return false;
+  }
+}
+
+function buildCameraDiagnostic(permissionState, policyState, mode) {
+  return [
+    'Mode: ' + mode,
+    'Permission: ' + permissionState,
+    'Policy: ' + policyState,
+    'HTTPS: ' + (window.isSecureContext ? 'yes' : 'no'),
+    'Top frame: ' + (isTopWindow() ? 'yes' : 'no'),
+    'getUserMedia: ' + (navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? 'available' : 'missing')
+  ].join(' | ');
+}
+
+function normalizeCameraError(err) {
+  const rawMessage = err && (err.message || err.name || String(err));
+  const message = rawMessage || 'Browser belum memberi akses kamera.';
+
+  if (err && err.code === 'CAMERA_POLICY_BLOCKED') {
+    return {
+      title: 'Akses kamera diblokir browser',
+      msg: 'Browser memblokir kamera untuk konteks halaman ini sebelum prompt izin bisa muncul. Buka URL web app hasil deployment /exec langsung di Chrome, bukan preview editor, lalu coba SCAN QR lagi.'
+    };
+  }
+
+  if (err && err.code === 'CAMERA_PERMISSION_DENIED_STICKY') {
+    return {
+      title: 'Izin kamera sudah ditolak',
+      msg: 'Browser sudah menyimpan status kamera sebagai Block/Deny untuk halaman ini, jadi prompt tidak akan muncul lagi. Reset izin dari ikon gembok di address bar atau Site settings > Camera > Allow, lalu muat ulang aplikasi.'
+    };
+  }
+
+  if (err && err.code === 'INSECURE_CONTEXT') {
+    return {
+      title: 'Kamera butuh HTTPS',
+      msg: 'Browser hanya membuka kamera pada halaman HTTPS yang aman. Gunakan URL deployment Apps Script yang diawali https://script.google.com/.../exec.'
+    };
+  }
+
+  if (err && err.code === 'NO_BARCODE_DETECTOR') {
+    return {
+      title: 'Scanner native tidak tersedia',
+      msg: 'Browser ini tidak menyediakan BarcodeDetector. Fallback scanner akan dicoba otomatis.'
+    };
+  }
+
+  if (/notallowed|permission|denied|izin/i.test(message)) {
+    return {
+      title: 'Izin kamera belum aktif',
+      msg: 'Browser menolak akses kamera. Jika prompt tidak muncul, reset izin kamera dari ikon gembok di address bar atau Site settings > Camera > Allow, lalu muat ulang aplikasi.'
+    };
+  }
+
+  if (/notfound|devicesnotfound|no camera/i.test(message)) {
+    return {
+      title: 'Kamera tidak ditemukan',
+      msg: 'Perangkat tidak mengembalikan kamera yang bisa dipakai oleh browser.'
+    };
+  }
+
+  if (/notreadable|trackstart|in use|busy/i.test(message)) {
+    return {
+      title: 'Kamera sedang dipakai',
+      msg: 'Tutup aplikasi lain yang memakai kamera, lalu klik SCAN QR lagi.'
+    };
+  }
+
+  return {
+    title: 'Kamera gagal dibuka',
+    msg: message + '\n\nKlik SCAN QR lagi dan pilih Izinkan/Allow jika prompt kamera muncul.'
+  };
+}
+
+function requestNativeCameraStream() {
+  if (!window.isSecureContext) {
+    const err = new Error('Halaman bukan secure context.');
+    err.code = 'INSECURE_CONTEXT';
+    throw err;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error('Browser tidak menyediakan akses kamera.');
+  }
+  return navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: {
+      facingMode: { ideal: 'environment' },
+      width: { ideal: 1280 },
+      height: { ideal: 720 }
+    }
+  });
+}
+
+async function startNativeCameraScanner(stream) {
+  if (typeof BarcodeDetector === 'undefined') {
+    const err = new Error('BarcodeDetector tidak tersedia.');
+    err.code = 'NO_BARCODE_DETECTOR';
+    throw err;
+  }
+
+  const reader = document.getElementById('qr-reader');
+
+  // Native live scanner belum dipakai pada flow aktif.
+  // Jika fungsi ini terpanggil, hentikan stream agar kamera tidak menggantung.
+  if (!reader && stream && stream.getTracks) {
+    stream.getTracks().forEach(track => track.stop());
+    return;
+  }
+
+  if (stream && stream.getTracks) {
+    stream.getTracks().forEach(track => track.stop());
+  }
+}
+
+function showScanToast(message) {
+  const toast = document.getElementById('scan-toast');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.add('show');
+  window.clearTimeout(showScanToast.timer);
+  showScanToast.timer = window.setTimeout(() => toast.classList.remove('show'), 4500);
+}
+
+function indicateScanSuccess() {
+  if (navigator.vibrate) navigator.vibrate(60);
+  showScanToast('Scan berhasil');
+}
+
+
+// ── LIVE QR SCANNER (WebRTC) ───────────────────────────────
+
+window.openLiveScanner = function(context) {
+  if (typeof Html5Qrcode === 'undefined') {
+    showResult(context, 'error', 'Library Html5Qrcode belum termuat.');
+    return;
+  }
+  
+  const overlay = document.getElementById('qr-overlay');
+  const fbBtn = document.getElementById('qr-fallback-btn');
+  if (fbBtn) fbBtn.style.display = 'none';
+  const reader = document.getElementById('qr-reader');
+  if (!overlay || !reader) return;
+  
+  // Set current context
+  QR.context = context;
+  
+  // Reset overlay
+  document.getElementById('qr-result-text').textContent = 'Mencari barcode/QR...';
+  setQRDiagnostic('');
+  
+  overlay.classList.add('active');
+  
+  const formats = getScannerFormats();
+  if (!QR.html5QrCode) {
+    QR.html5QrCode = new Html5Qrcode('qr-reader', formats ? { formatsToSupport: formats } : undefined);
+  }
+  
+  QR.isScanning = true;
+  
+  const config = {
+    fps: 10,
+    qrbox: { width: 250, height: 150 },
+    aspectRatio: 1.0,
+    disableFlip: false
+  };
+  
+  QR.html5QrCode.start(
+    { facingMode: "environment" }, 
+    config,
+    (decodedText, decodedResult) => {
+      // onSuccess
+      const serial = normalizeSerial(decodedText);
+      if (serial && isValidSerial(serial)) {
+        indicateScanSuccess();
+        document.getElementById('qr-result-text').textContent = 'Ditemukan: ' + serial;
+        stopQRScanner().then(() => {
+          onSerialScanned(QR.context, serial);
+        });
+      }
+    },
+    (errorMessage) => {
+      // onProgress (ignore mostly)
+    }
+  ).catch(err => {
+    let msg = typeof err === 'string' ? err : (err.message || 'Izin ditolak atau tidak didukung');
+    setQRDiagnostic('Kamera gagal: ' + msg);
+    const fbBtn = document.getElementById('qr-fallback-btn');
+    if (fbBtn) fbBtn.style.display = 'block';
+    QR.isScanning = false;
+  });
+};
+
+window.stopQRScanner = async function() {
+  if (QR.html5QrCode && QR.isScanning) {
+    try {
+      await QR.html5QrCode.stop();
+      // QR.html5QrCode.clear();
+    } catch (e) {
+      console.warn("Failed to stop QR scanner", e);
+    }
+  }
+  QR.isScanning = false;
+  const overlay = document.getElementById('qr-overlay');
+  const fbBtn = document.getElementById('qr-fallback-btn');
+  if (fbBtn) fbBtn.style.display = 'none';
+  if (overlay) overlay.classList.remove('active');
+};
+
+
+window.handleFallbackImage = async function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById('qr-result-text').textContent = 'Memproses gambar...';
+  setQRDiagnostic('');
+  try {
+    const decodedText = await QR.html5QrCode.scanFile(file, true);
+    const serial = normalizeSerial(decodedText);
+    if (serial && isValidSerial(serial)) {
+      indicateScanSuccess();
+      document.getElementById('qr-result-text').textContent = 'Ditemukan: ' + serial;
+      stopQRScanner().then(() => {
+        onSerialScanned(QR.context, serial);
+      });
+    } else {
+      setQRDiagnostic('Bukan format kartu MK/NIK yang valid.');
+    }
+  } catch (err) {
+    setQRDiagnostic('Barcode tidak terdeteksi pada gambar.');
+  }
+  e.target.value = ''; // reset
+};
+
+// ── Init ───────────────────────────────────────────────────
+function bindUiEvents() {
+  const logo = document.getElementById('dam-logo');
+  if (logo) logo.addEventListener('error', () => { logo.style.display = 'none'; });
+
+  const btnHamburger = document.getElementById('btn-hamburger');
+  const overlay = document.getElementById('sidebar-overlay');
+  const tabbar = document.getElementById('app-tabbar');
+
+  if (btnHamburger) {
+    btnHamburger.addEventListener('click', () => {
+      if(tabbar) tabbar.classList.toggle('open');
+      if(overlay) overlay.classList.toggle('active');
+    });
+  }
+
+  if (overlay) {
+    overlay.addEventListener('click', () => {
+      if(tabbar) tabbar.classList.remove('open');
+      if(overlay) overlay.classList.remove('active');
+    });
+  }
+
+  document.addEventListener('click', event => {
+    const control = event.target.closest('[data-action]');
+    if (!control) return;
+
+    const action = control.dataset.action;
+    const context = control.dataset.context;
+    
+    if (action === 'submit-login') handleLoginSubmit();
+    if (action === 'submit-logout') handleLogout();
+    if (action === 'switch-tab') switchTab(control.dataset.tab);
+
+    if (action === 'submit-serial') submitSerial(context);
+    if (action === 'confirm-masuk') confirmMasuk();
+    if (action === 'confirm-keluar') confirmKeluar();
+    if (action === 'load-dashboard') loadDashboard();
+    if (action === 'process-absen-report') processAbsenReport();
+    if (action === 'export-absen-report') exportAbsenReport();
+    if (action === 'process-area-report') processAreaReport();
+  });
+
+  document.addEventListener('input', event => {
+    if (event.target.dataset.action !== 'search-karyawan') return;
+    debounceSearch(event.target.value, event.target.dataset.context);
+  });
+
+  document.addEventListener('change', event => {
+    if (event.target.dataset.action !== 'period-type') return;
+    updatePeriodInput(event.target.dataset.target);
+  });
+
+  document.addEventListener('keydown', event => {
+    const action = event.target.dataset.action;
+    const context = event.target.dataset.context;
+
+    if (event.key === 'Enter' && event.target.matches('input[id$="-serial"]')) {
+      event.preventDefault();
+      submitSerial(event.target.id.replace('-serial', ''));
+    }
+    if (event.key === 'Enter' && (event.target.id === 'login-nik' || event.target.id === 'login-password')) {
+      event.preventDefault();
+      handleLoginSubmit();
+    }
+    if (event.key === 'Enter' && event.target.id === 'cek-absen-nik') {
+      event.preventDefault();
+      processAbsenReport();
+    }
+    if (event.key === 'Enter' && event.target.id === 'cek-area-nik') {
+      event.preventDefault();
+      processAreaReport();
+    }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+
+  bindUiEvents();
+  updatePeriodInput('cek-absen');
+  updatePeriodInput('cek-area');
+  // Ensure all serial inputs start STRICTLY EMPTY
+  resetAllSerialInputs();
+  forceClearSerialInputs();
+  window.setTimeout(forceClearSerialInputs, 0);
+  // Clear any stale result cards
+  ['masuk', 'keluar', 'security'].forEach(ctx => {
+    const el = document.getElementById(ctx + '-result');
+    if (el) { el.className = 'result-card'; el.innerHTML = ''; }
+  });
+  // Reset masuk state
+  STATE.masuk = {
+    selectedNIK: null,
+    selectedNama: null,
+    selectedType: null,
+    selectedDept: null,
+    selectedJabatan: null,
+    scannedSerial: null,
+    completed: false
+  };
+  STATE.keluar = { scannedSerial:null, bindingData:null };
+  STATE.security = { scannedSerial:null };
+  STATE.authBootPending = false;
+  loadRecentLogs();
+
+  const sessionNik = getIncomingSessionNik();
+  if (sessionNik) {
+    beginModuleAutoLogin(sessionNik);
+    return;
+  }
+
+  setLoginUiMode('login');
+  restoreSavedSession();
+});
+
+window.addEventListener('pageshow', () => {
+  resetAllSerialInputs();
+  forceClearSerialInputs();
+  window.setTimeout(forceClearSerialInputs, 0);
+});
+
+// Close autocomplete on outside click
+document.addEventListener('click', e => {
+  if (!e.target.closest('.autocomplete-wrap')) {
+    document.querySelectorAll('.autocomplete-list').forEach(l => l.style.display='none');
+  }
+});
+
+function handleLogout() {
+  localStorage.removeItem('dam_session');
+  STATE.currentUser = null;
+  resetAllSerialInputs();
+  
+  document.getElementById('app-header').style.display = 'none';
+  document.getElementById('app-tabbar').style.display = 'none';
+  
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  setLoginUiMode('login');
+  
+  const loginNik = document.getElementById('login-nik');
+  const loginPwd = document.getElementById('login-password');
+  if(loginNik) loginNik.value = '';
+  if(loginPwd) loginPwd.value = '';
+}
+</script>

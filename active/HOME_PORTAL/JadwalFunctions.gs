@@ -58,6 +58,72 @@ function getKaryawanExpectedForDate(tanggal) {
   }
 }
 
+/**
+ * Versi cepat untuk batch processing — baca sheet JADWAL hanya 1x,
+ * kembalikan fungsi lookup yang bekerja dari cache memori.
+ * Dipakai oleh rebuildHistoricalRecapDataset_ untuk menghindari
+ * ribuan kali baca sheet (tiap baris log memanggil getKaryawanExpectedForDate).
+ *
+ * @returns {{ getForDate: function(tanggal: string): Array }}
+ */
+function buildJadwalCache_() {
+  try {
+    const sheet = getSheet(SHEET_JADWAL);
+    const data  = sheet.getDataRange().getValues();
+    // Kolom: NIK(0), NAMA(1), DEPT(2), SHIFT(3), TANGGAL_MULAI(4), TANGGAL_SELESAI(5)
+
+    // Simpan semua entri jadwal sebagai array sederhana
+    const entries = [];
+    for (let i = 1; i < data.length; i++) {
+      const nik   = asText(data[i][0]).trim();
+      const shift = asText(data[i][3]).trim();
+      const mulaiRaw = data[i][4];
+      const selesaiRaw = data[i][5];
+      if (!nik || !shift || !mulaiRaw) continue;
+      entries.push({
+        nik: nik,
+        nama: asText(data[i][1]).trim(),
+        dept: asText(data[i][2]).trim(),
+        shift: shift,
+        mulaiKey: formatDateForSort(mulaiRaw) || '',
+        selesaiKey: selesaiRaw ? (formatDateForSort(selesaiRaw) || '99991231') : '99991231'
+      });
+    }
+
+    // Memo-cache per tanggal agar lookup O(1) setelah kunjungan pertama
+    const memo = {};
+
+    return {
+      getForDate: function(tanggal) {
+        try {
+          const targetDate = parseIsoDate(tanggal) || parseSheetDate(tanggal);
+          if (!targetDate) return [];
+          const targetKey = formatDateForSort(targetDate);
+          if (memo[targetKey] !== undefined) return memo[targetKey];
+
+          const result = [];
+          const seenNik = {};
+          for (let i = 0; i < entries.length; i++) {
+            const e = entries[i];
+            if (seenNik[e.nik]) continue;
+            if (targetKey >= e.mulaiKey && targetKey <= e.selesaiKey) {
+              seenNik[e.nik] = true;
+              result.push({ nik: e.nik, nama: e.nama, dept: e.dept, shift: e.shift });
+            }
+          }
+          memo[targetKey] = result;
+          return result;
+        } catch(ex) {
+          return [];
+        }
+      }
+    };
+  } catch(e) {
+    Logger.log('buildJadwalCache_: failed - ' + e.message);
+    return { getForDate: function() { return []; } };
+  }
+}
+
 // ── Ambil semua entri jadwal (untuk tabel manajemen) ─────────
 /**
  * @param {string} deptFilter - '' = semua dept
@@ -83,8 +149,8 @@ function getJadwalShift(deptFilter) {
         nama:          asText(data[i][1]).trim(),
         dept,
         shift:         asText(data[i][3]).trim(),
-        tanggalMulai:  data[i][4] ? formatDate(parseSheetDate(data[i][4]) || new Date(data[i][4])) : '',
-        tanggalSelesai:data[i][5] ? formatDate(parseSheetDate(data[i][5]) || new Date(data[i][5])) : ''
+        tanggalMulai:  data[i][4] ? (formatDate(parseAnyDate(data[i][4])) || '') : '',
+        tanggalSelesai:data[i][5] ? (formatDate(parseAnyDate(data[i][5])) || '') : ''
       });
     }
 

@@ -7,31 +7,36 @@
 
 // ── Scan Area Kerja ───────────────────────────────────────
 function scanAreaKerja(noKartuMK, tujuan, catatan, forceMode) {
-  return withDocumentLock(function() {
+  // FIX E-2: Validasi kartu di luar lock, lalu gunakan per-card lock (bukan global lock)
+  // Pola ini konsisten dengan bindKartu & releaseKartu — kartu berbeda bisa diproses paralel
+  var _no;
+  try { _no = assertCard(noKartuMK); } catch(eCard) { return { ok: false, msg: eCard.message }; }
+
+  return withCardLock(_no, function() {
     try {
-      const no = assertCard(noKartuMK);
+      const no = _no;
       const areaTujuan  = asText(tujuan).trim();
       const areaCatatan = asText(catatan).trim();
       if (!areaTujuan) return { ok: false, msg: 'Area pengawasan wajib dipilih sebelum scan.' };
-
-      let kar = getKaryawanByNIK(no);
-      if (!kar) {
-        const binding = getBindingStatus(no);
-        if (!binding.ok) return binding;
-        if (binding.status !== 'BOUND') return { ok: false, msg: `Kartu / ID ${no} tidak dikenal atau tidak aktif.`, status: 'UNKNOWN' };
-        const master = getKaryawanByNIK(binding.nik) || {};
-        kar = {
-          nik: binding.nik, nama: binding.nama,
-          type: asText(master.type),
-          dept: binding.dept || asText(master.dept),
-          jabatan: binding.jabatan || asText(master.jabatan)
-        };
-      }
+      const binding = getBindingStatus(no);
+      if (!binding.ok) return binding;
+      if (binding.status !== 'BOUND') return { ok: false, msg: `Kartu MK ${no} tidak sedang terikat / tidak aktif.`, status: 'UNKNOWN' };
+      const master = getKaryawanByNIK(binding.nik) || {};
+      const kar = {
+        nik: binding.nik,
+        nama: binding.nama,
+        type: asText(master.type),
+        dept: binding.dept || asText(master.dept),
+        jabatan: binding.jabatan || asText(master.jabatan)
+      };
 
       const now = nowWIB();
-      const tanggal = formatDate(now);
+      const tanggalValue = makeSheetDateValue(now);
+      const tanggal = formatDate(now);   // untuk display & resolveFactoryEventContext
+      const todayKey = formatDateForSort(now);  // 'yyyyMMdd' — untuk compare tanggal sheet
       const waktu = formatDateTime(now);
-      const factoryStatus = getFactoryRecapStatus(kar.nik, tanggal);
+      const workContext = resolveFactoryEventContext(tanggal, kar.nik, formatTime(now), 'keluar');
+      const factoryStatus = getFactoryFlowStatusFromLogs_(kar.nik, workContext.tanggal || tanggal);
       if (!isExternalKaryawan(kar) && factoryStatus !== 'DI DALAM') {
         return { ok: false, msg: `${kar.nama} belum tercatat masuk pabrik hari ini.`, status: 'OUTSIDE_FACTORY' };
       }
@@ -39,11 +44,26 @@ function scanAreaKerja(noKartuMK, tujuan, catatan, forceMode) {
         return { ok: false, msg: `${kar.nama} sudah tercatat keluar pabrik hari ini.`, status: 'OUTSIDE_FACTORY' };
       }
 
+      const activityKey = asText(kar.nik).trim();
       const sheetA = getSheet(SHEET_AREA_KERJA);
       const dataA  = sheetA.getDataRange().getValues();
       let lastInOut = 'OUT';
       for (let i = dataA.length - 1; i >= 1; i--) {
-        if (normalizeCard(dataA[i][0]) === no) { lastInOut = asText(dataA[i][1]); break; }
+        const rowNik = asText(dataA[i][4]).trim();
+        const rowCard = normalizeCard(dataA[i][0]);
+        if (rowNik === activityKey || rowCard === no) {
+          const rowTanggalRaw = dataA[i][2];
+          // FIX A-1: gunakan formatDateForSort ('yyyyMMdd') untuk compare —
+          // aman apapun format yang tersimpan di sheet (ISO string, Date object, dd/MM/yyyy)
+          const rowTanggalKey = formatDateForSort(rowTanggalRaw);
+
+          if (rowTanggalKey === todayKey) {
+            lastInOut = asText(dataA[i][1]);
+          } else {
+            lastInOut = 'OUT'; // Beda hari, auto-reset supaya scan pertama hari ini jadi IN
+          }
+          break;
+        }
       }
 
       let inout = '';
@@ -51,7 +71,8 @@ function scanAreaKerja(noKartuMK, tujuan, catatan, forceMode) {
       else if (forceMode === 'OUT') inout = 'OUT';
       else                          inout = (lastInOut === 'OUT') ? 'IN' : 'OUT';
 
-      sheetA.appendRow([no, inout, tanggal, formatTime(now), kar.nik, kar.nama, areaTujuan, areaCatatan]);
+      sheetA.appendRow([no, inout, formatDateISO(now), formatTime(now), kar.nik, kar.nama, areaTujuan, areaCatatan]);
+      applyNumberFormatToCell_(sheetA, sheetA.getLastRow(), 3, '@');  // plain text
 
       return {
         ok: true, inout, noKartuMK: no, karyawan: kar, waktu,
@@ -67,9 +88,8 @@ function scanAreaKerja(noKartuMK, tujuan, catatan, forceMode) {
 // ── Dashboard Data ────────────────────────────────────────
 function getDashboardData(basis, basisValue, deptFilter, typeFilter) {
   try {
-    function toDateKey(value) {
-      return formatDateForSort(value);
-    }
+    // FIX B-2: toDateKey() inner function dihapus — konflik dengan global toDateKey di ReportFunctions.gs
+    // Gunakan formatDateForSort() langsung di mana diperlukan (sudah dipakai di buildDateTimeKey di bawah)
 
     function parseTimeParts(value) {
       if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
@@ -99,7 +119,7 @@ function getDashboardData(basis, basisValue, deptFilter, typeFilter) {
     }
 
     function buildDateTimeKey(dateValue, timeValue) {
-      const dateKey = toDateKey(dateValue);
+      const dateKey = formatDateForSort(dateValue);  // FIX B-2: eksplisit, tidak bergantung scope toDateKey
       const timeParts = parseTimeParts(timeValue);
       const timeKey = timeParts
         ? String(timeParts.hh).padStart(2, '0') + String(timeParts.mm).padStart(2, '0') + String(timeParts.ss).padStart(2, '0')
@@ -138,7 +158,7 @@ function getDashboardData(basis, basisValue, deptFilter, typeFilter) {
       const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
       const end = new Date(start);
       let basisLabel = 'Hari ini (WIB)';
-      let periodLabel = formatDate(today);
+      let periodLabel = formatDateUI(today);
       let metricHint = 'Snapshot operasional dihitung dari recap status DI DALAM dan log area pada basis waktu yang dipilih.';
       let shiftLabel = '';
       const valueText = asText(basisValue).trim();
@@ -148,7 +168,7 @@ function getDashboardData(basis, basisValue, deptFilter, typeFilter) {
         start.setTime(new Date(pickedDate.getFullYear(), pickedDate.getMonth(), pickedDate.getDate()).getTime());
         end.setTime(start.getTime());
         basisLabel = 'Tanggal Tertentu (WIB)';
-        periodLabel = formatDate(start);
+        periodLabel = formatDateUI(start);
         metricHint = 'Snapshot operasional memakai recap status DI DALAM pada tanggal yang dipilih.';
       } else if (mode === 'shift') {
         const pickedDate = parseIsoDate(valueText) || today;
@@ -157,7 +177,7 @@ function getDashboardData(basis, basisValue, deptFilter, typeFilter) {
         const selectedShift = asText(valueText).trim().toLowerCase();
         shiftLabel = selectedShift === 'shift2' ? 'Shift 2' : selectedShift === 'shift3' ? 'Shift 3' : 'Shift 1';
         basisLabel = shiftLabel + ' (WIB)';
-        periodLabel = formatDate(start) + ' · ' + shiftLabel;
+        periodLabel = formatDateUI(start) + ' · ' + shiftLabel;
         metricHint = 'Snapshot operasional memakai recap status DI DALAM yang jam masuknya berada dalam ' + shiftLabel + '.';
       } else if (mode === 'week') {
         const match = valueText.match(/^(\d{4})-W(\d{2})$/);
@@ -172,7 +192,7 @@ function getDashboardData(basis, basisValue, deptFilter, typeFilter) {
         end.setTime(new Date(start).getTime());
         end.setDate(start.getDate() + 6);
         basisLabel = 'Minggu ' + week + ' (WIB)';
-        periodLabel = formatDate(start) + ' - ' + formatDate(end);
+        periodLabel = formatDateUI(start) + ' - ' + formatDateUI(end);
         metricHint = 'Snapshot operasional memakai status terakhir per karyawan pada minggu yang dipilih.';
       } else if (mode === 'month') {
         const parts = valueText.split('-').map(function(part) { return parseInt(part, 10); });
@@ -270,6 +290,14 @@ function getDashboardData(basis, basisValue, deptFilter, typeFilter) {
           delete insideByNik[fItem.nik];
         }
       }
+      // Rebuild typeCounts & deptCounts dari boundList yang sudah difilter
+      // agar typePopulation dan deptPopulation.total akurat saat filter aktif
+      Object.keys(typeCounts).forEach(function(k) { delete typeCounts[k]; });
+      Object.keys(deptCounts).forEach(function(k) { delete deptCounts[k]; });
+      boundList.forEach(function(item) {
+        typeCounts[item.type || 'UNKNOWN'] = (typeCounts[item.type || 'UNKNOWN'] || 0) + 1;
+        deptCounts[item.dept || 'Tanpa Departemen'] = (deptCounts[item.dept || 'Tanpa Departemen'] || 0) + 1;
+      });
     }
 
     // ── Shift Coverage dari recapData ──────────────────────
@@ -328,7 +356,7 @@ function getDashboardData(basis, basisValue, deptFilter, typeFilter) {
         currentAreaMetaByNik[rowNik] = {
           area: area,
           jamMasukArea: toDisplayTime(dataA[i][3]),
-          tanggalMasukArea: formatDate(dataA[i][2])
+          tanggalMasukArea: formatDateUI(dataA[i][2])
         };
       }
       if (inout === 'OUT') {
@@ -525,7 +553,7 @@ function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter) {
     const now    = nowWIB();
     let targetDate;
     if (tanggal) {
-      targetDate = parseIsoDate(tanggal) || parseSheetDate(tanggal) || new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      targetDate = parseIsoDate(tanggal) || parseSheetDate(tanggal, getFactoryOperationalDateParsingOptions_()) || new Date(now.getFullYear(), now.getMonth(), now.getDate());
     } else {
       targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     }
@@ -585,16 +613,22 @@ function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter) {
       const refTime = jamMasuk || jamKeluar;
       let shiftLabel = '';
       if (refTime) {
-        const refDate = (Object.prototype.toString.call(refTime) === '[object Date]' && !isNaN(refTime.getTime()))
-          ? refTime
-          : (function() {
-              const mins = timeStrToMinutes(refTime);
-              if (mins === null) return null;
-              const d = new Date(targetDate);
-              d.setHours(Math.floor(mins/60), mins%60, 0, 0);
-              return d;
-            })();
-        if (refDate) shiftLabel = detectShift(refDate);
+        const expectedShift = normalizeShiftLabel(getExpectedShiftForNikOnDate(nik, tanggalDisplay));
+        const eventTypeForShift = jamMasuk ? 'masuk' : 'keluar';
+        if (expectedShift && matchesShiftEventTime(expectedShift, refTime, eventTypeForShift)) {
+          shiftLabel = expectedShift;
+        } else {
+          const refDate = (Object.prototype.toString.call(refTime) === '[object Date]' && !isNaN(refTime.getTime()))
+            ? refTime
+            : (function() {
+                const mins = timeStrToMinutes(refTime);
+                if (mins === null) return null;
+                const d = new Date(targetDate);
+                d.setHours(Math.floor(mins/60), mins%60, 0, 0);
+                return d;
+              })();
+          if (refDate) shiftLabel = detectShift(refDate, eventTypeForShift);
+        }
       }
 
       // Filter shift
@@ -610,6 +644,7 @@ function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter) {
 
       // Hitung lembur
       const overtimeMinutes = (jamKeluarStr && shiftLabel) ? getOvertimeMinutes(jamKeluarStr, shiftLabel) : 0;
+      const earlyLeaveMinutes = (jamKeluarStr && shiftLabel) ? getEarlyLeaveMinutes(jamKeluarStr, shiftLabel) : 0;
 
       // Tentukan presenceStatus + deteksi anomali
       let presenceStatus = 'belum_masuk';
@@ -657,13 +692,14 @@ function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter) {
         lateMinutes,
         lateCategory,
         overtimeMinutes,
+        earlyLeaveMinutes,
         anomali
       });
     });
 
     // ── Summary ───────────────────────────────────────────
     let totalHadir = 0, totalBelumMasuk = 0, totalSudahPulang = 0, totalAnomali = 0;
-    let totalOnTime = 0, totalRingan = 0, totalSedang = 0, totalBerat = 0, totalLembur = 0;
+    let totalOnTime = 0, totalRingan = 0, totalSedang = 0, totalBerat = 0, totalLembur = 0, totalPulangCepat = 0;
     const byShiftMap = {};
 
     kehadiranList.forEach(function(item) {
@@ -686,23 +722,24 @@ function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter) {
           case 'berat':   totalBerat++;   byShiftMap[sl].terlambat++; break;
         }
         if (item.overtimeMinutes > 0) { totalLembur++; byShiftMap[sl].lembur++; }
+        if (item.earlyLeaveMinutes > 0) totalPulangCepat++;
       }
     });
 
     // ── Coverage dari JADWAL_SHIFT ────────────────────────
     const expectedList = getKaryawanExpectedForDate(tanggalDisplay);
-    const expectedByShift = { 'Shift 1': 0, 'Shift 2': 0, 'Shift 3': 0 };
+    const expectedByShift = {};
     let totalExpected = 0;
     expectedList.forEach(function(e) {
       // Apply dept/type filter juga ke expected
       if (deptF && (e.dept || '').toUpperCase() !== deptF) return;
-      const sl = e.shift || '';
+      const sl = normalizeShiftLabel(e.shift || '');
       if (shiftF && sl !== shiftF) return;
-      if (expectedByShift[sl] !== undefined) expectedByShift[sl]++;
+      expectedByShift[sl] = (expectedByShift[sl] || 0) + 1;
       totalExpected++;
     });
 
-    const shiftOrder = ['Shift 1', 'Shift 2', 'Shift 3'];
+    const shiftOrder = ['Shift 1', 'Shift 2', 'Shift 3', 'Non Shift 08:00-16:00', 'Non Shift 10:00-18:00'];
     const byShift = shiftOrder.map(function(s) {
       const base = byShiftMap[s] || { label: s, hadir: 0, terlambat: 0, lembur: 0 };
       const exp  = expectedByShift[s] || 0;
@@ -732,6 +769,7 @@ function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter) {
         totalOnTime,
         totalTerlambat: { ringan: totalRingan, sedang: totalSedang, berat: totalBerat },
         totalLembur,
+        totalPulangCepat,
         totalAnomali,
         totalExpected,
         coveragePct,

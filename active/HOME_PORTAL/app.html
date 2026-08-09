@@ -3003,8 +3003,29 @@ function bindUiEvents() {
     if (action === 'load-jadwal-shift') loadJadwalShift();
     if (action === 'lookup-jadwal-nik') lookupJadwalNik();
     if (action === 'process-absen-report') processAbsenReport();
+    if (action === 'reset-absen-filter') {
+      const searchEl = document.getElementById('cek-absen-search');
+      const sortEl = document.getElementById('cek-absen-sort');
+      if (searchEl) searchEl.value = '';
+      if (sortEl) sortEl.value = 'tanggal_desc';
+      processAbsenReport();
+    }
     if (action === 'export-absen-report') exportAbsenReport();
+    if (action === 'change-absen-page') processAbsenReport(control.dataset.page);
+    
     if (action === 'process-area-report') processAreaReport();
+    if (action === 'reset-area-filter') {
+      const searchEl = document.getElementById('cek-area-search');
+      const sortEl = document.getElementById('cek-area-sort');
+      if (searchEl) searchEl.value = '';
+      if (sortEl) sortEl.value = 'tanggal_desc';
+      processAreaReport();
+    }
+    if (action === 'change-area-page') processAreaReport(control.dataset.page, REPORT_CACHE.areaRekapPage || 1);
+    if (action === 'change-area-rekap-page') {
+      REPORT_CACHE.areaRekapPage = Math.max(1, parseInt(control.dataset.page, 10) || 1);
+      processAreaReport(REPORT_CACHE.area ? REPORT_CACHE.area.page : 1, REPORT_CACHE.areaRekapPage);
+    }
   });
 
   document.addEventListener('input', event => {
@@ -3034,11 +3055,11 @@ function bindUiEvents() {
       event.preventDefault();
       handleLoginSubmit();
     }
-    if (event.key === 'Enter' && event.target.id === 'cek-absen-nik') {
+    if (event.key === 'Enter' && (event.target.id === 'cek-absen-nik' || event.target.id === 'cek-absen-search')) {
       event.preventDefault();
       processAbsenReport();
     }
-    if (event.key === 'Enter' && event.target.id === 'cek-area-nik') {
+    if (event.key === 'Enter' && (event.target.id === 'cek-area-nik' || event.target.id === 'cek-area-search')) {
       event.preventDefault();
       processAreaReport();
     }

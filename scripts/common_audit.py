@@ -23,6 +23,7 @@ SKIP_DIRS = {
     ".idea",
     ".vscode",
     "__pycache__",
+    "Junk",
     "node_modules",
     "vendor",
     "reports",

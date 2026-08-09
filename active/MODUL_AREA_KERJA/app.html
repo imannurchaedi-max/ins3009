@@ -434,7 +434,7 @@ async function switchTab(tab) {
       if ((tab === 'cek-absen' || tab === 'cek-area') && typeof updatePeriodInput === 'function') updatePeriodInput();
     } 
     else if (targetUrl) {
-      window.top.location.replace = targetUrl.includes('?') ? targetUrl : targetUrl + token;
+      window.top.location.replace(targetUrl.includes('?') ? targetUrl : targetUrl + token);
     } 
     else {
       alert('URL Module belum dikonfigurasi di CONFIG_MODUL!');
@@ -827,7 +827,7 @@ function loadDashboard() {
           <div class="log-time">${k.waktuBind ? k.waktuBind.split(' ')[1] || '' : ''}</div>
         </div>`).join('');
     })
-    .getDashboardData();
+    .getDashboardData('today', '', '', '');
 }
 
 // ── RECENT LOGS ────────────────────────────────────────────
@@ -929,7 +929,7 @@ function processAbsenReport() {
         reportPeriodValue: periodValue,
         autoRun: '1'
       });
-      window.top.location.replace = targetUrl + query;
+      window.top.location.replace(targetUrl + query);
     })
     .getModuleUrls();
 }

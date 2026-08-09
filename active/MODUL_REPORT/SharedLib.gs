@@ -412,15 +412,16 @@ function getKaryawanMapByNIK() {
 
   for (let i = 1; i < data.length; i++) {
     const nik = asText(data[i][0]).trim();
-    if (!nik) continue;
+    const nama = asText(data[i][1]).trim();
+    if (!nik || !nama) continue; // Skip ghost rows or empty NIK/Nama
     map[nik] = {
       nik,
-      nama: asText(data[i][1]),
-      type: asText(data[i][2]),
-      dept: asText(data[i][3]),
-      jabatan: asText(data[i][4]),
-      userLevel: asText(data[i][5]).toUpperCase(),
-      password: asText(data[i][6])
+      nama: nama,
+      type: asText(data[i][2]).trim() || 'TIDAK_ADA_DATA',
+      dept: asText(data[i][3]).trim() || 'TIDAK_ADA_DATA',
+      jabatan: asText(data[i][4]).trim() || 'TIDAK_ADA_DATA',
+      userLevel: asText(data[i][5]).toUpperCase().trim() || 'USER',
+      password: asText(data[i][6]).trim()
     };
   }
 
@@ -435,13 +436,15 @@ function getKaryawanByNIK(nik) {
   const data  = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (asText(data[i][0]).trim() === target) {
+      const nama = asText(data[i][1]).trim();
+      if (!nama) continue; // Skip ghost rows
       return {
-        nik: asText(data[i][0]),
-        nama: asText(data[i][1]),
-        type: asText(data[i][2]),
-        dept: asText(data[i][3]),
-        jabatan: asText(data[i][4]),
-        userLevel: asText(data[i][5]).toUpperCase()
+        nik: target,
+        nama: nama,
+        type: asText(data[i][2]).trim() || 'TIDAK_ADA_DATA',
+        dept: asText(data[i][3]).trim() || 'TIDAK_ADA_DATA',
+        jabatan: asText(data[i][4]).trim() || 'TIDAK_ADA_DATA',
+        userLevel: asText(data[i][5]).toUpperCase().trim() || 'USER'
       };
     }
   }

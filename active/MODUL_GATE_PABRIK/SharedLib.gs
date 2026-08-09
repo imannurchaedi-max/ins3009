@@ -13,6 +13,7 @@ const SHEET_KELUAR_PABRIK     = 'REGISTRASI SAAT KELUAR PABRIK';
 const SHEET_AREA_KERJA        = 'REGISTRASI MASUK KELUAR AREA KERJA';
 const SHEET_BINDING           = 'BINDING_KARTU_MK';
 const SHEET_RECAP_ABSEN       = 'ABSEN IN OUT MK';
+const SHEET_JADWAL            = 'JADWAL_SHIFT';  // FIX F-2: konstanta yang hilang
 
 const SHEET_HEADERS = {
   [SHEET_KARYAWAN]: ['NIK','NAMA','TYPE KAYARAWAN','DEPT','JABATAN','USER LEVEL','PASSWORD'],
@@ -20,7 +21,8 @@ const SHEET_HEADERS = {
   [SHEET_KELUAR_PABRIK]: ['NO KARTU MK','NIK','NAMA','TANGGAL','JAM KELUAR','SHIFT'],
   [SHEET_AREA_KERJA]: ['NO KARTU MK','INOUT','TANGGAL','JAM CATAT','NIK','NAMA','TUJUAN','CATATAN'],
   [SHEET_BINDING]: ['NO_KARTU_MK','NIK','NAMA','DEPT','JABATAN','WAKTU_BIND','STATUS'],
-  [SHEET_RECAP_ABSEN]: ['TANGGAL','NIK','NAMA','DEPARTEMEN','JABATAN','JAM MASUK','JAM KELUAR','STATUS','NO KARTU MK','NO LOKER']
+  [SHEET_RECAP_ABSEN]: ['TANGGAL','NIK','NAMA','DEPARTEMEN','JABATAN','JAM MASUK','JAM KELUAR','STATUS','NO KARTU MK','NO LOKER'],
+  [SHEET_JADWAL]: ['NIK','NAMA','DEPT','SHIFT','TANGGAL_MULAI','TANGGAL_SELESAI']  // FIX F-2
 };
 
 const OPTIONAL_SHEET_HEADERS = {
@@ -298,6 +300,166 @@ function detectShift(d) {
   }
 }
 
+// FIX C-1: SHIFT_CONFIG disinkronkan dengan HOME_PORTAL/SharedLib.gs
+// Perubahan: boundary jam seragam, tambah crossMidnight, preStartMinutes, postEndMinutes
+const SHIFT_CONFIG = {
+  'Shift 1': { startTotal: 6 * 60 + 0,  endTotal: 13 * 60 + 59, preStartMinutes: 60, postEndMinutes: 120, crossMidnight: false },
+  'Shift 2': { startTotal: 14 * 60 + 0, endTotal: 21 * 60 + 59, preStartMinutes: 60, postEndMinutes: 120, crossMidnight: false },
+  'Shift 3': { startTotal: 22 * 60 + 0, endTotal: 5 * 60 + 59,  preStartMinutes: 60, postEndMinutes: 120, crossMidnight: true  }
+};
+
+// FIX C-1: SHIFT_EVENT_RULES disesuaikan dengan boundary HOME_PORTAL
+const SHIFT_EVENT_RULES = {
+  'Shift 1': {
+    masuk:  [{ start: 5 * 60 + 0,  end: 9 * 60 + 59 }],
+    keluar: [{ start: 13 * 60 + 0, end: 15 * 60 + 59 }]
+  },
+  'Shift 2': {
+    masuk:  [{ start: 13 * 60 + 0, end: 15 * 60 + 59 }],
+    keluar: [{ start: 21 * 60 + 0, end: 23 * 60 + 59 }]
+  },
+  'Shift 3': {
+    masuk:  [{ start: 21 * 60 + 0, end: 23 * 60 + 59 }],
+    keluar: [{ start: 0,           end: 7 * 60 + 59 }]
+  }
+};
+
+function timeStrToMinutes(value) {
+  try {
+    if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+      // FIX A-3: Gunakan Utilities.formatDate WIB, bukan getHours() yang UTC-based
+      const parts = Utilities.formatDate(value, 'Asia/Jakarta', 'HH:mm').split(':');
+      return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+    }
+    const text = asText(value).trim();
+    const match = text.match(/(\d{1,2}):(\d{2})/);
+    if (!match) return null;
+    return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+  } catch(e) {
+    Logger.log('SharedLib.timeStrToMinutes: failed - ' + e.message);
+    return null;
+  }
+}
+
+function normalizeTimeValue(value) {
+  try {
+    if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+      return Utilities.formatDate(value, 'Asia/Jakarta', 'HH:mm:ss');
+    }
+    const text = asText(value).trim();
+    const match = text.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (!match) return '';
+    return (
+      String(parseInt(match[1], 10)).padStart(2, '0') + ':' +
+      String(parseInt(match[2], 10)).padStart(2, '0') + ':' +
+      String(parseInt(match[3] || '0', 10)).padStart(2, '0')
+    );
+  } catch(e) {
+    Logger.log('SharedLib.normalizeTimeValue: failed - ' + e.message);
+    return '';
+  }
+}
+
+function compareTimeValues(a, b) {
+  const minuteA = timeStrToMinutes(a);
+  const minuteB = timeStrToMinutes(b);
+  if (minuteA === null || minuteB === null) {
+    return normalizeTimeValue(a).localeCompare(normalizeTimeValue(b));
+  }
+  if (minuteA < minuteB) return -1;
+  if (minuteA > minuteB) return 1;
+  return normalizeTimeValue(a).localeCompare(normalizeTimeValue(b));
+}
+
+function isMinuteInRange(minute, startMinute, endMinute) {
+  if (minute === null || minute === undefined) return false;
+  if (startMinute <= endMinute) return minute >= startMinute && minute <= endMinute;
+  return minute >= startMinute || minute <= endMinute;
+}
+
+function isMinuteInRanges(minute, ranges) {
+  if (!Array.isArray(ranges)) return false;
+  return ranges.some(function(range) {
+    return isMinuteInRange(minute, range.start, range.end);
+  });
+}
+
+function matchesShiftEventTime(shiftLabel, timeValue, eventType) {
+  const rules = SHIFT_EVENT_RULES[shiftLabel];
+  const minute = timeStrToMinutes(timeValue);
+  if (!rules || minute === null) return false;
+  return isMinuteInRanges(minute, eventType === 'keluar' ? rules.keluar : rules.masuk);
+}
+
+function inferShiftByEventTime(timeValue, eventType) {
+  const minute = timeStrToMinutes(timeValue);
+  if (minute === null) return '';
+  const labels = ['Shift 1', 'Shift 2', 'Shift 3'];
+  for (let i = 0; i < labels.length; i++) {
+    if (matchesShiftEventTime(labels[i], minute, eventType)) return labels[i];
+  }
+  return '';
+}
+
+function getExpectedShiftForNikOnDate(nik, tanggal) {
+  try {
+    if (typeof getKaryawanExpectedForDate !== 'function') return '';
+    const expectedList = getKaryawanExpectedForDate(tanggal);
+    if (!Array.isArray(expectedList)) return '';
+    const targetNik = asText(nik).trim();
+    for (let i = 0; i < expectedList.length; i++) {
+      if (asText(expectedList[i].nik).trim() === targetNik) {
+        return asText(expectedList[i].shift).trim();
+      }
+    }
+    return '';
+  } catch(e) {
+    Logger.log('SharedLib.getExpectedShiftForNikOnDate: failed - ' + e.message);
+    return '';
+  }
+}
+
+function resolveRecapShiftContext(tanggal, nik, timeValue, eventType) {
+  try {
+    const baseDate = parseIsoDate(tanggal) || parseSheetDate(tanggal);
+    if (!baseDate) {
+      return { tanggal: asText(tanggal).trim(), shiftLabel: inferShiftByEventTime(timeValue, eventType), source: 'raw' };
+    }
+
+    const currentDate = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+    const previousDate = new Date(currentDate);
+    previousDate.setDate(previousDate.getDate() - 1);
+
+    const currentLabel = formatDate(currentDate);
+    const previousLabel = formatDate(previousDate);
+    const expectedToday = getExpectedShiftForNikOnDate(nik, currentLabel);
+    const expectedPrev = getExpectedShiftForNikOnDate(nik, previousLabel);
+    const inferredShift = inferShiftByEventTime(timeValue, eventType);
+    const minute = timeStrToMinutes(timeValue);
+
+    if (eventType === 'keluar') {
+      if (expectedPrev === 'Shift 3' && matchesShiftEventTime('Shift 3', timeValue, 'keluar')) {
+        return { tanggal: previousLabel, shiftLabel: 'Shift 3', source: 'jadwal_prev' };
+      }
+      if (expectedToday && matchesShiftEventTime(expectedToday, timeValue, 'keluar')) {
+        return { tanggal: currentLabel, shiftLabel: expectedToday, source: 'jadwal_today' };
+      }
+      if (inferredShift === 'Shift 3' && minute !== null && minute <= (7 * 60)) {
+        return { tanggal: previousLabel, shiftLabel: 'Shift 3', source: 'infer_prev' };
+      }
+      return { tanggal: currentLabel, shiftLabel: expectedToday || inferredShift || '', source: 'default_keluar' };
+    }
+
+    if (expectedToday && matchesShiftEventTime(expectedToday, timeValue, 'masuk')) {
+      return { tanggal: currentLabel, shiftLabel: expectedToday, source: 'jadwal_today' };
+    }
+    return { tanggal: currentLabel, shiftLabel: expectedToday || inferredShift || '', source: 'default_masuk' };
+  } catch(e) {
+    Logger.log('SharedLib.resolveRecapShiftContext: failed - ' + e.message);
+    return { tanggal: asText(tanggal).trim(), shiftLabel: '', source: 'error' };
+  }
+}
+
 // ---- LOCKING ----
 
 function withDocumentLock(work) {
@@ -403,6 +565,84 @@ function makeRecapKey(tanggal, nik) {
   return asText(tanggal).trim() + '|' + asText(nik).trim();
 }
 
+function getRecapSourceSnapshot(nik, recapTanggal) {
+  try {
+    const targetNik = asText(nik).trim();
+    const targetTanggal = asText(recapTanggal).trim();
+    const snapshot = {
+      nama: '',
+      dept: '',
+      jabatan: '',
+      jamMasuk: '',
+      jamKeluar: '',
+      noKartuMK: '',
+      noLoker: ''
+    };
+
+    if (!targetNik || !targetTanggal) return snapshot;
+
+    const master = getKaryawanByNIK(targetNik) || {};
+    snapshot.nama = asText(master.nama);
+    snapshot.dept = asText(master.dept);
+    snapshot.jabatan = asText(master.jabatan);
+
+    function absorbRow(row, eventType) {
+      const rowNik = asText(row[1]).trim();
+      if (rowNik !== targetNik) return;
+
+      const parsedDate = parseSheetDate(row[3]);
+      const rowTanggal = parsedDate ? formatDate(parsedDate) : asText(row[3]).trim();
+      const rowJam = normalizeTimeValue(row[4]);
+      if (!rowTanggal || !rowJam) return;
+
+      const recapContext = resolveRecapShiftContext(rowTanggal, targetNik, rowJam, eventType);
+      if (asText(recapContext.tanggal).trim() !== targetTanggal) return;
+
+      const rowNama = asText(row[2]).trim();
+      const rowKartu = normalizeCard(row[0]);
+      const rowLoker = asText(row[6] || '').trim();
+
+      if (!snapshot.nama && rowNama) snapshot.nama = rowNama;
+      if (!snapshot.noKartuMK && rowKartu) snapshot.noKartuMK = rowKartu;
+      if (!snapshot.noLoker && rowLoker) snapshot.noLoker = rowLoker;
+
+      if (eventType === 'masuk') {
+        if (!snapshot.jamMasuk || compareTimeValues(rowJam, snapshot.jamMasuk) < 0) {
+          snapshot.jamMasuk = rowJam;
+          if (rowKartu) snapshot.noKartuMK = rowKartu;
+          if (rowLoker) snapshot.noLoker = rowLoker;
+        }
+        return;
+      }
+
+      if (!snapshot.jamKeluar || compareTimeValues(rowJam, snapshot.jamKeluar) > 0) {
+        snapshot.jamKeluar = rowJam;
+        if (!snapshot.noKartuMK && rowKartu) snapshot.noKartuMK = rowKartu;
+        if (!snapshot.noLoker && rowLoker) snapshot.noLoker = rowLoker;
+      }
+    }
+
+    const masukData = getSheet(SHEET_MASUK_PABRIK).getDataRange().getValues();
+    for (let i = 1; i < masukData.length; i++) absorbRow(masukData[i], 'masuk');
+
+    const keluarData = getSheet(SHEET_KELUAR_PABRIK).getDataRange().getValues();
+    for (let i = 1; i < keluarData.length; i++) absorbRow(keluarData[i], 'keluar');
+
+    return snapshot;
+  } catch(e) {
+    Logger.log('SharedLib.getRecapSourceSnapshot: failed - ' + e.message);
+    return {
+      nama: '',
+      dept: '',
+      jabatan: '',
+      jamMasuk: '',
+      jamKeluar: '',
+      noKartuMK: '',
+      noLoker: ''
+    };
+  }
+}
+
 // ---- KARYAWAN LOOKUP ----
 
 function getKaryawanMapByNIK() {
@@ -412,15 +652,16 @@ function getKaryawanMapByNIK() {
 
   for (let i = 1; i < data.length; i++) {
     const nik = asText(data[i][0]).trim();
-    if (!nik) continue;
+    const nama = asText(data[i][1]).trim();
+    if (!nik || !nama) continue; // Skip ghost rows or empty NIK/Nama
     map[nik] = {
       nik,
-      nama: asText(data[i][1]),
-      type: asText(data[i][2]),
-      dept: asText(data[i][3]),
-      jabatan: asText(data[i][4]),
-      userLevel: asText(data[i][5]).toUpperCase(),
-      password: asText(data[i][6])
+      nama: nama,
+      type: asText(data[i][2]).trim() || 'TIDAK_ADA_DATA',
+      dept: asText(data[i][3]).trim() || 'TIDAK_ADA_DATA',
+      jabatan: asText(data[i][4]).trim() || 'TIDAK_ADA_DATA',
+      userLevel: asText(data[i][5]).toUpperCase().trim() || 'USER',
+      password: asText(data[i][6]).trim()
     };
   }
 
@@ -435,13 +676,15 @@ function getKaryawanByNIK(nik) {
   const data  = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (asText(data[i][0]).trim() === target) {
+      const nama = asText(data[i][1]).trim();
+      if (!nama) continue; // Skip ghost rows
       return {
-        nik: asText(data[i][0]),
-        nama: asText(data[i][1]),
-        type: asText(data[i][2]),
-        dept: asText(data[i][3]),
-        jabatan: asText(data[i][4]),
-        userLevel: asText(data[i][5]).toUpperCase()
+        nik: target,
+        nama: nama,
+        type: asText(data[i][2]).trim() || 'TIDAK_ADA_DATA',
+        dept: asText(data[i][3]).trim() || 'TIDAK_ADA_DATA',
+        jabatan: asText(data[i][4]).trim() || 'TIDAK_ADA_DATA',
+        userLevel: asText(data[i][5]).toUpperCase().trim() || 'USER'
       };
     }
   }

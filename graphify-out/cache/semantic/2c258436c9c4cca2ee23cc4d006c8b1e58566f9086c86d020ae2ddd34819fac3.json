@@ -1,0 +1,1 @@
+{"nodes": [{"id": "home_portal_index", "label": "HOME_PORTAL Index.html", "file_type": "code", "source_file": "active/HOME_PORTAL/Index.html"}], "edges": [{"source": "home_portal_index", "target": "home_portal_style", "relation": "references", "confidence": "EXTRACTED", "confidence_score": 1.0, "source_file": "active/HOME_PORTAL/Index.html"}], "hyperedges": []}

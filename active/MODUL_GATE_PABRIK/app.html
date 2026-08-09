@@ -623,34 +623,66 @@ function confirmMasuk() {
 
   REQUEST_BUSY.masukConfirm = true;
   setActionBusy('confirm-masuk', true);
-  showResult('masuk', 'warning', 'Memproses...');
   document.getElementById('masuk-confirm').classList.remove('visible');
 
-  google.script.run
-    .withFailureHandler(err => {
+  // ── GPS Verification ──────────────────────────────────────
+  showResult('masuk', 'warning', '📍 Memverifikasi lokasi Anda...');
+
+  if (!navigator.geolocation) {
+    REQUEST_BUSY.masukConfirm = false;
+    setActionBusy('confirm-masuk', false);
+    document.getElementById('masuk-confirm').classList.add('visible');
+    showResult('masuk', 'error', '❌ Browser Anda tidak mendukung GPS. Gunakan browser modern untuk masuk pabrik.');
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    function(position) {
+      const userLat = position.coords.latitude;
+      const userLng = position.coords.longitude;
+      showResult('masuk', 'warning', 'Memproses absen...');
+      
+      google.script.run
+        .withFailureHandler(err => {
+          REQUEST_BUSY.masukConfirm = false;
+          setActionBusy('confirm-masuk', false);
+          handleGasFailure('masuk', err);
+          document.getElementById('masuk-confirm').classList.add('visible');
+        })
+        .withSuccessHandler(res => {
+          REQUEST_BUSY.masukConfirm = false;
+          setActionBusy('confirm-masuk', false);
+          if (res.ok) {
+            showResult('masuk', 'success',
+              `<strong>${escHtml(res.karyawan.nama)}</strong> berhasil masuk pabrik.<br>
+               <span class="meta">Kartu: ${escHtml(res.noKartuMK)} - ${escHtml(res.waktu)} - ${escHtml(res.shift)}</span>`);
+            resetMasuk();
+          } else {
+            if (res.gpsBlocked) {
+              showResult('masuk', 'error',
+                `📍 <strong>Lokasi tidak valid</strong><br><span class="meta">${escHtml(res.msg)}</span>`);
+            } else if (res.htmlMsg) {
+              showResult('masuk', res.ok === false ? 'error' : 'warning', res.htmlMsg);
+            } else {
+              showResult('masuk', 'error', escHtml(res.msg));
+            }
+            document.getElementById('masuk-confirm').classList.add('visible');
+          }
+        })
+        .bindKartu(serialToSend, s.selectedNIK, loker, userLat, userLng);
+    },
+    function(err) {
       REQUEST_BUSY.masukConfirm = false;
       setActionBusy('confirm-masuk', false);
-      handleGasFailure('masuk', err);
       document.getElementById('masuk-confirm').classList.add('visible');
-    })
-    .withSuccessHandler(res => {
-      REQUEST_BUSY.masukConfirm = false;
-      setActionBusy('confirm-masuk', false);
-      if (res.ok) {
-        showResult('masuk', 'success',
-          `<strong>${escHtml(res.karyawan.nama)}</strong> berhasil masuk pabrik.<br>
-           <span class="meta">Kartu: ${escHtml(res.noKartuMK)} - ${escHtml(res.waktu)} - ${escHtml(res.shift)}</span>`);
-        resetMasuk();
-      } else {
-        if (res.htmlMsg) {
-          showResult('masuk', 'error', res.htmlMsg);
-        } else {
-          showResult('masuk', 'error', escHtml(res.msg));
-        }
-        document.getElementById('masuk-confirm').classList.add('visible');
-      }
-    })
-    .bindKartu(serialToSend, s.selectedNIK, loker);
+      let msg = '❌ Akses lokasi diperlukan untuk masuk pabrik.';
+      if (err.code === 1) msg += ' Izin GPS ditolak — aktifkan di pengaturan browser.';
+      else if (err.code === 2) msg += ' Sinyal GPS tidak tersedia.';
+      else if (err.code === 3) msg += ' GPS timeout. Pastikan GPS aktif dan coba lagi.';
+      showResult('masuk', 'error', msg);
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+  );
 }
 
 window.forceReleaseOldCard = function(oldKartu) {
@@ -759,32 +791,66 @@ function confirmKeluar() {
   
   REQUEST_BUSY.keluarConfirm = true;
   setActionBusy('confirm-keluar', true);
-  showResult('keluar', 'warning', 'Memproses...');
   document.getElementById('keluar-confirm').classList.remove('visible');
 
-  google.script.run
-    .withFailureHandler(err => {
+  // ── GPS Verification ──────────────────────────────────────
+  showResult('keluar', 'warning', '📍 Memverifikasi lokasi Anda...');
+
+  if (!navigator.geolocation) {
+    REQUEST_BUSY.keluarConfirm = false;
+    setActionBusy('confirm-keluar', false);
+    document.getElementById('keluar-confirm').classList.add('visible');
+    showResult('keluar', 'error', '❌ Browser Anda tidak mendukung GPS. Gunakan browser modern untuk keluar pabrik.');
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    function(position) {
+      const userLat = position.coords.latitude;
+      const userLng = position.coords.longitude;
+      showResult('keluar', 'warning', 'Memproses keluar...');
+      
+      google.script.run
+        .withFailureHandler(err => {
+          REQUEST_BUSY.keluarConfirm = false;
+          setActionBusy('confirm-keluar', false);
+          handleGasFailure('keluar', err);
+          document.getElementById('keluar-confirm').classList.add('visible');
+        })
+        .withSuccessHandler(res => {
+          REQUEST_BUSY.keluarConfirm = false;
+          setActionBusy('confirm-keluar', false);
+          if (res.ok) {
+            showResult('keluar', 'success',
+              `<strong>${escHtml(res.karyawan.nama)}</strong> telah keluar pabrik.<br>
+               <span class="meta">Kartu ${escHtml(res.noKartuMK)} telah dilepas - ${escHtml(res.waktu)}</span>`);
+            STATE.keluar = { scannedSerial:null, bindingData:null };
+            document.getElementById('keluar-serial').value = '';
+            resetKeluarUi();
+          } else {
+            if (res.gpsBlocked) {
+              showResult('keluar', 'error',
+                `📍 <strong>Lokasi tidak valid</strong><br><span class="meta">${escHtml(res.msg)}</span>`);
+            } else {
+              showResult('keluar', 'error', escHtml(res.msg));
+            }
+            document.getElementById('keluar-confirm').classList.add('visible');
+          }
+        })
+        .releaseKartu(serial, loker, userLat, userLng);
+    },
+    function(err) {
       REQUEST_BUSY.keluarConfirm = false;
       setActionBusy('confirm-keluar', false);
-      handleGasFailure('keluar', err);
       document.getElementById('keluar-confirm').classList.add('visible');
-    })
-    .withSuccessHandler(res => {
-      REQUEST_BUSY.keluarConfirm = false;
-      setActionBusy('confirm-keluar', false);
-      if (res.ok) {
-        showResult('keluar', 'success',
-          `<strong>${escHtml(res.karyawan.nama)}</strong> telah keluar pabrik.<br>
-           <span class="meta">Kartu ${escHtml(res.noKartuMK)} telah dilepas - ${escHtml(res.waktu)}</span>`);
-        STATE.keluar = { scannedSerial:null, bindingData:null };
-        document.getElementById('keluar-serial').value = '';
-        resetKeluarUi();
-      } else {
-        showResult('keluar', 'error', escHtml(res.msg));
-        document.getElementById('keluar-confirm').classList.add('visible');
-      }
-    })
-    .releaseKartu(serial, loker);
+      let msg = '❌ Akses lokasi diperlukan untuk keluar pabrik.';
+      if (err.code === 1) msg += ' Izin GPS ditolak — aktifkan di pengaturan browser.';
+      else if (err.code === 2) msg += ' Sinyal GPS tidak tersedia.';
+      else if (err.code === 3) msg += ' GPS timeout. Pastikan GPS aktif dan coba lagi.';
+      showResult('keluar', 'error', msg);
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+  );
 }
 
 // ── SECURITY: Handle scan ──────────────────────────────────
@@ -848,7 +914,7 @@ function loadDashboard() {
           <div class="log-time">${k.waktuBind ? k.waktuBind.split(' ')[1] || '' : ''}</div>
         </div>`).join('');
     })
-    .getDashboardData();
+    .getDashboardData('today', '', '', '');
 }
 
 // ── RECENT LOGS ────────────────────────────────────────────

@@ -356,7 +356,7 @@ async function switchTab(tab) {
       if (tab === 'cek-absen') applyPendingAbsenRoute();
     } 
     else if (targetUrl) {
-      window.top.location.replace = targetUrl + token;
+      window.top.location.replace(targetUrl + token);
     } 
     else {
       alert('URL Module belum dikonfigurasi di CONFIG_MODUL!');
@@ -741,7 +741,7 @@ function loadDashboard() {
           <div class="log-time">${k.waktuBind ? k.waktuBind.split(' ')[1] || '' : ''}</div>
         </div>`).join('');
     })
-    .getDashboardData();
+    .getDashboardData('today', '', '', '');
 }
 
 // ── RECENT LOGS ────────────────────────────────────────────

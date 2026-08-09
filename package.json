@@ -3,12 +3,15 @@
     "push": "node scripts/push-all.js",
     "push:force": "node scripts/push-all.js --force",
     "deploy": "node scripts/push-all.js --deploy",
-    "deploy:force": "node scripts/push-all.js --deploy --force"
+    "deploy:force": "node scripts/push-all.js --deploy --force",
+    "verify": "node scripts/verify-config.js",
+    "watch:deploy": "python scripts/watch_and_deploy.py"
   },
   "dependencies": {
     "acorn": "^8.16.0"
   },
   "devDependencies": {
+    "@google/clasp": "^3.3.0",
     "dependency-cruiser": "^17.4.2"
   }
 }

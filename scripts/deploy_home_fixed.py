@@ -24,7 +24,7 @@ def update_home_portal_deployment(home_path, deployment_id, description):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Update HOME_PORTAL in place so the public exec URL stays fixed."
+        description="Update deployment tertentu untuk HOME_PORTAL secara in-place."
     )
     parser.add_argument(
         "--deployment-id",
@@ -33,7 +33,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--description",
-        default="Update HOME_PORTAL without changing URL",
+        default="Update HOME_PORTAL deployment in place",
         help="Deployment description.",
     )
     args = parser.parse_args()

@@ -31,12 +31,47 @@ const OPTIONAL_SHEET_HEADERS = {
   [SHEET_KELUAR_PABRIK]: ['NO LOKER']
 };
 
+const CANONICAL_FACTORY_DATE_FORMAT    = 'dd/MM/yyyy';
+const CANONICAL_FACTORY_TIME_FORMAT    = 'HH:mm:ss';
+const CANONICAL_FACTORY_DT_FORMAT      = 'dd/MM/yyyy HH:mm:ss';
+const FACTORY_OPERATION_START_DATE = new Date(2026, 3, 25);
+const FACTORY_OPERATION_MAX_FUTURE_DAYS = 2;
+
+// ---- GPS / LOCATION CONSTANTS ----
+const FACTORY_GPS_LAT      = -6.4931996266991305;
+const FACTORY_GPS_LNG      = 107.42188564795138;
+const FACTORY_GPS_RADIUS_M = 200;  // meter — max distance allowed from factory gate
+
+/**
+ * haversineDistance_ — Menghitung jarak dua titik GPS dalam meter.
+ * Formula Haversine, akurat untuk jarak pendek (<10km).
+ * @param {number} lat1 - Latitude titik user
+ * @param {number} lng1 - Longitude titik user
+ * @param {number} lat2 - Latitude titik referensi (pabrik)
+ * @param {number} lng2 - Longitude titik referensi (pabrik)
+ * @returns {number} Jarak dalam meter
+ */
+function haversineDistance_(lat1, lng1, lat2, lng2) {
+  const R = 6371000; // radius bumi dalam meter
+  const toRad = function(deg) { return deg * Math.PI / 180; };
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+          + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2))
+          * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 // ---- TEXT UTILITIES ----
 
 function asText(value) {
   if (value === null || value === undefined) return '';
   try {
-    return String(value);
+    let str = String(value).trim();
+    if (str.endsWith('.0')) {
+      str = str.slice(0, -2);
+    }
+    return str;
   } catch(e) {
     Logger.log('SharedLib.asText: conversion failed — ' + e.message);
     return '';
@@ -173,6 +208,32 @@ function formatDate(d) {
   }
 }
 
+function formatDateUI(d) {
+  if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+  try {
+    return Utilities.formatDate(d, 'Asia/Jakarta', 'd - MMM - yyyy');
+  } catch(e) {
+    Logger.log('SharedLib.formatDateUI: failed — ' + e.message);
+    return '';
+  }
+}
+
+/**
+ * formatDateISO — Formats a Date as 'yyyy-MM-dd' (ISO 8601).
+ * USE THIS FOR STORAGE to Google Sheets — Google Sheets NEVER
+ * auto-parses this format, making it locale-proof (100% safe).
+ * For DISPLAY to users, use formatDate() which returns dd/MM/yyyy.
+ */
+function formatDateISO(d) {
+  if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+  try {
+    return Utilities.formatDate(d, 'Asia/Jakarta', 'yyyy-MM-dd');
+  } catch(e) {
+    Logger.log('SharedLib.formatDateISO: failed — ' + e.message);
+    return '';
+  }
+}
+
 function formatTime(d) {
   if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
   try {
@@ -193,6 +254,295 @@ function formatDateTime(d) {
   }
 }
 
+/**
+ * parseAnyDate — Locale-agnostic date parser.
+ * Accepts: Date object, "dd/MM/yyyy", "MM/dd/yyyy", "yyyy-MM-dd",
+ *          "dd/MM/yyyy HH:mm:ss", "yyyy-MM-dd HH:mm:ss"
+ * Rule: If the first number > 12 it MUST be the day (not month).
+ * Fallback ambiguous cases → DD/MM/YYYY (Indonesian standard).
+ * @param {*} value - raw value from sheet cell or user input
+ * @returns {Date|null} - Date object in local time, or null if invalid
+ */
+function parseAnyDate(value) {
+  if (!value && value !== 0) return null;
+  // Already a Date object
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+    return value;
+  }
+  const text = String(value).trim();
+  if (!text) return null;
+
+  // ISO format: yyyy-MM-dd or yyyy-MM-ddTHH:mm:ss
+  let m = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) {
+    return createStrictDateTime_(
+      parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10),
+      parseInt(m[4]||'0',10), parseInt(m[5]||'0',10), parseInt(m[6]||'0',10)
+    );
+  }
+
+  // Localized: d1/d2/yyyy [HH:mm[:ss]]
+  m = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) {
+    const a = parseInt(m[1],10);
+    const b = parseInt(m[2],10);
+    const yyyy = parseInt(m[3],10);
+    const hh = parseInt(m[4]||'0',10);
+    const mm = parseInt(m[5]||'0',10);
+    const ss = parseInt(m[6]||'0',10);
+    // If first number > 12 → must be day (DD/MM/YYYY)
+    if (a > 12) return createStrictDateTime_(yyyy, b-1, a, hh, mm, ss);
+    // If second number > 12 → must be day in month position (MM/DD/YYYY)
+    if (b > 12) return createStrictDateTime_(yyyy, a-1, b, hh, mm, ss);
+    // Ambiguous: default to DD/MM/YYYY (Indonesian)
+    return createStrictDateTime_(yyyy, b-1, a, hh, mm, ss);
+  }
+
+  // Dash-separated: d1-d2-yyyy
+  m = text.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);
+  if (m) {
+    const a = parseInt(m[1],10);
+    const b = parseInt(m[2],10);
+    const yyyy = parseInt(m[3],10);
+    if (a > 12) return createStrictDateTime_(yyyy, b-1, a, 0, 0, 0);
+    if (b > 12) return createStrictDateTime_(yyyy, a-1, b, 0, 0, 0);
+    return createStrictDateTime_(yyyy, b-1, a, 0, 0, 0);
+  }
+
+  return null;
+}
+
+/**
+ * ensureTextColumnFormat_ — Set entire column to plain text (@) so
+ * Google Sheets never reformats stored strings based on user locale.
+ * @param {Sheet} sheet
+ * @param {number} colIndex - 1-based column index
+ */
+function ensureTextColumnFormat_(sheet, colIndex) {
+  try {
+    if (!sheet || !colIndex) return;
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return;
+    sheet.getRange(2, colIndex, lastRow - 1, 1).setNumberFormat('@');
+  } catch(e) {
+    Logger.log('SharedLib.ensureTextColumnFormat_: failed — ' + e.message);
+  }
+}
+
+function createStrictDateTime_(year, monthIndex, day, hour, minute, second) {
+  const dateValue = new Date(year, monthIndex, day, hour || 0, minute || 0, second || 0, 0);
+  if (
+    isNaN(dateValue.getTime()) ||
+    dateValue.getFullYear() !== year ||
+    dateValue.getMonth() !== monthIndex ||
+    dateValue.getDate() !== day ||
+    dateValue.getHours() !== (hour || 0) ||
+    dateValue.getMinutes() !== (minute || 0) ||
+    dateValue.getSeconds() !== (second || 0)
+  ) {
+    return null;
+  }
+  return dateValue;
+}
+
+function cloneDateOnly_(value) {
+  if (!(value instanceof Date) || isNaN(value.getTime())) return null;
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function normalizeDateParseOptions_(options) {
+  const config = options || {};
+  return {
+    preferredSlashOrder: asText(config.preferredSlashOrder).trim().toUpperCase() === 'MDY' ? 'MDY' : 'DMY',
+    allowMonthFirstFallback: config.allowMonthFirstFallback === true,
+    requireWindowMatch: config.requireWindowMatch === true,
+    minDate: cloneDateOnly_(config.minDate),
+    maxDate: cloneDateOnly_(config.maxDate),
+    referenceDate: cloneDateOnly_(config.referenceDate)
+  };
+}
+
+function getFactoryOperationalDateParsingOptions_(overrides) {
+  const maxDate = cloneDateOnly_(nowWIB()) || new Date();
+  maxDate.setDate(maxDate.getDate() + FACTORY_OPERATION_MAX_FUTURE_DAYS);
+  return normalizeDateParseOptions_(Object.assign({
+    preferredSlashOrder: 'DMY',
+    allowMonthFirstFallback: true,
+    requireWindowMatch: true,
+    minDate: FACTORY_OPERATION_START_DATE,
+    maxDate: maxDate
+  }, overrides || {}));
+}
+
+function isDateWithinParseWindow_(dateValue, options) {
+  if (!(dateValue instanceof Date) || isNaN(dateValue.getTime())) return false;
+  const config = normalizeDateParseOptions_(options);
+  const dateOnly = cloneDateOnly_(dateValue);
+  if (config.minDate && dateOnly.getTime() < config.minDate.getTime()) return false;
+  if (config.maxDate && dateOnly.getTime() > config.maxDate.getTime()) return false;
+  return true;
+}
+
+function applyParseWindowToDate_(dateValue, options) {
+  if (!(dateValue instanceof Date) || isNaN(dateValue.getTime())) return null;
+  const config = normalizeDateParseOptions_(options);
+  if (!config.requireWindowMatch) return new Date(dateValue.getTime());
+  return isDateWithinParseWindow_(dateValue, config) ? new Date(dateValue.getTime()) : null;
+}
+
+function chooseSlashDateCandidate_(preferredCandidate, alternateCandidate, options) {
+  const config = normalizeDateParseOptions_(options);
+  const preferred = preferredCandidate instanceof Date && !isNaN(preferredCandidate.getTime()) ? preferredCandidate : null;
+  const alternate = alternateCandidate instanceof Date && !isNaN(alternateCandidate.getTime()) ? alternateCandidate : null;
+
+  if (!preferred && !alternate) return null;
+  if (!alternate) return applyParseWindowToDate_(preferred, config);
+  if (!preferred) {
+    if (!config.allowMonthFirstFallback) return null;
+    return applyParseWindowToDate_(alternate, config);
+  }
+
+  const preferredWindowed = applyParseWindowToDate_(preferred, config);
+  const alternateWindowed = applyParseWindowToDate_(alternate, config);
+  if (preferredWindowed && !alternateWindowed) return preferredWindowed;
+  if (!preferredWindowed && alternateWindowed) return alternateWindowed;
+  if (preferredWindowed && alternateWindowed && config.referenceDate) {
+    const refTime = config.referenceDate.getTime();
+    const preferredDistance = Math.abs(cloneDateOnly_(preferredWindowed).getTime() - refTime);
+    const alternateDistance = Math.abs(cloneDateOnly_(alternateWindowed).getTime() - refTime);
+    return preferredDistance <= alternateDistance ? preferredWindowed : alternateWindowed;
+  }
+  if (preferredWindowed && alternateWindowed) return preferredWindowed;
+  if (config.requireWindowMatch) return null;
+  return preferred;
+}
+
+function parseLocalizedDateTime_(text, options) {
+  const config = normalizeDateParseOptions_(options);
+  const match = asText(text).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!match) return null;
+
+  const first = parseInt(match[1], 10);
+  const second = parseInt(match[2], 10);
+  const year = parseInt(match[3], 10);
+  const hour = parseInt(match[4] || '0', 10);
+  const minute = parseInt(match[5] || '0', 10);
+  const secondValue = parseInt(match[6] || '0', 10);
+
+  const dmyCandidate = createStrictDateTime_(year, second - 1, first, hour, minute, secondValue);
+  const mdyCandidate = createStrictDateTime_(year, first - 1, second, hour, minute, secondValue);
+
+  if (config.preferredSlashOrder === 'MDY') {
+    return chooseSlashDateCandidate_(mdyCandidate, dmyCandidate, config);
+  }
+  return chooseSlashDateCandidate_(dmyCandidate, mdyCandidate, config);
+}
+
+function parseSheetDateTime(value, options) {
+  try {
+    if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+      return applyParseWindowToDate_(value, options);
+    }
+
+    const text = asText(value).trim();
+    if (!text) return null;
+
+    const localizedParsed = parseLocalizedDateTime_(text, options);
+    if (localizedParsed) return localizedParsed;
+
+    let match = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (match) {
+      return applyParseWindowToDate_(createStrictDateTime_(
+        parseInt(match[1], 10),
+        parseInt(match[2], 10) - 1,
+        parseInt(match[3], 10),
+        parseInt(match[4] || '0', 10),
+        parseInt(match[5] || '0', 10),
+        parseInt(match[6] || '0', 10)
+      ), options);
+    }
+
+    match = text.match(/^(\d{1,2})-(\d{1,2})-(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (match) {
+      return applyParseWindowToDate_(createStrictDateTime_(
+        parseInt(match[3], 10),
+        parseInt(match[2], 10) - 1,
+        parseInt(match[1], 10),
+        parseInt(match[4] || '0', 10),
+        parseInt(match[5] || '0', 10),
+        parseInt(match[6] || '0', 10)
+      ), options);
+    }
+
+    return null;
+  } catch(e) {
+    Logger.log('SharedLib.parseSheetDateTime: failed - ' + e.message);
+    return null;
+  }
+}
+
+function makeSheetDateValue(value, options) {
+  try {
+    const parsed = parseSheetDate(value, options);
+    if (!parsed) return '';
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  } catch(e) {
+    Logger.log('SharedLib.makeSheetDateValue: failed - ' + e.message);
+    return '';
+  }
+}
+
+function makeSheetDateTimeValue(dateValue, timeValue, options) {
+  try {
+    if (timeValue === undefined) {
+      const directParsed = parseSheetDateTime(dateValue, options);
+      return directParsed || '';
+    }
+
+    const baseDate = parseSheetDate(dateValue, options);
+    if (!baseDate) return '';
+
+    const normalizedTime = normalizeTimeValue(timeValue);
+    const match = normalizedTime.match(/^(\d{2}):(\d{2}):(\d{2})$/);
+    if (!match) {
+      return new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+    }
+
+    return new Date(
+      baseDate.getFullYear(),
+      baseDate.getMonth(),
+      baseDate.getDate(),
+      parseInt(match[1], 10),
+      parseInt(match[2], 10),
+      parseInt(match[3], 10)
+    );
+  } catch(e) {
+    Logger.log('SharedLib.makeSheetDateTimeValue: failed - ' + e.message);
+    return '';
+  }
+}
+
+function applyNumberFormatToColumn_(sheet, columnIndex, pattern, startRow) {
+  try {
+    if (!sheet || !columnIndex || !pattern) return;
+    const beginRow = Math.max(2, parseInt(startRow, 10) || 2);
+    const totalRows = sheet.getLastRow() - beginRow + 1;
+    if (totalRows <= 0) return;
+    sheet.getRange(beginRow, columnIndex, totalRows, 1).setNumberFormat(pattern);
+  } catch (e) {
+    Logger.log('SharedLib.applyNumberFormatToColumn_: failed - ' + e.message);
+  }
+}
+
+function applyNumberFormatToCell_(sheet, rowIndex, columnIndex, pattern) {
+  try {
+    if (!sheet || !rowIndex || !columnIndex || !pattern) return;
+    sheet.getRange(rowIndex, columnIndex).setNumberFormat(pattern);
+  } catch (e) {
+    Logger.log('SharedLib.applyNumberFormatToCell_: failed - ' + e.message);
+  }
+}
+
 function parseIsoDate(value) {
   try {
     const parts = asText(value).trim().split('-').map(function(part) { return parseInt(part, 10); });
@@ -204,26 +554,15 @@ function parseIsoDate(value) {
   }
 }
 
-function parseSheetDate(value) {
+function parseSheetDate(value, options) {
   try {
     if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
-      return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+      return cloneDateOnly_(applyParseWindowToDate_(value, options));
     }
 
     const text = asText(value).trim();
-    let parts = text.split('/');
-    if (parts.length === 3) {
-      const d = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
-      return isNaN(d.getTime()) ? null : d;
-    }
-
-    parts = text.split('-');
-    if (parts.length === 3) {
-      const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-      return isNaN(d.getTime()) ? null : d;
-    }
-
-    return null;
+    const parsedDateTime = parseSheetDateTime(text, options);
+    return cloneDateOnly_(parsedDateTime);
   } catch(e) {
     Logger.log('SharedLib.parseSheetDate: failed — ' + e.message);
     return null;
@@ -232,7 +571,7 @@ function parseSheetDate(value) {
 
 function formatDateForSort(value) {
   try {
-    const d = parseSheetDate(value);
+    const d = parseSheetDate(value, getFactoryOperationalDateParsingOptions_());
     return d ? Utilities.formatDate(d, 'Asia/Jakarta', 'yyyyMMdd') : asText(value);
   } catch(e) {
     Logger.log('SharedLib.formatDateForSort: failed — ' + e.message);
@@ -275,13 +614,13 @@ function getPeriodRange(periodType, periodValue) {
     value,
     start,
     end,
-    label: formatDate(start) + ' - ' + formatDate(end)
+    label: formatDateUI(start) + ' - ' + formatDateUI(end)
   };
 }
 
 function isDateInRange(value, range) {
   try {
-    const date = parseSheetDate(value);
+    const date = parseSheetDate(value, getFactoryOperationalDateParsingOptions_());
     if (!date) return false;
     return date.getTime() >= range.start.getTime() && date.getTime() <= range.end.getTime();
   } catch(e) {
@@ -289,38 +628,162 @@ function isDateInRange(value, range) {
   }
 }
 
-function detectShift(d) {
+function detectShift(d, eventType) {
   try {
-    const h = parseInt(Utilities.formatDate(d, 'Asia/Jakarta', 'HH'), 10);
-    if (h >= 6 && h < 14)  return 'Shift 1';
-    if (h >= 14 && h < 22) return 'Shift 2';
-    return 'Shift 3';
+    let mins = null;
+    if (Object.prototype.toString.call(d) === '[object Date]' && !isNaN(d.getTime())) {
+      const parts = Utilities.formatDate(d, 'Asia/Jakarta', 'HH:mm').split(':');
+      mins = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+    } else {
+      mins = timeStrToMinutes(d);
+    }
+    if (mins === null) return 'Shift 1';
+
+    const type = (asText(eventType) || 'masuk').toLowerCase().trim() === 'keluar' ? 'keluar' : 'masuk';
+    const labels = ['Shift 1', 'Shift 2', 'Shift 3'];
+
+    // Prioritas khusus Shift 3 KELUAR (dini hari 00:00-07:59).
+    // Jam ini adalah zona eksklusif Shift 3 keluar. Meski Shift 1 juga overlap
+    // (window keluar 05:00-15:59), secara operasional keluar jam 00:00-07:59
+    // PASTI dari Shift 3 (masuk malam sebelumnya jam 22:00).
+    if (type === 'keluar' && mins <= 7 * 60 + 59) {
+      const shift3Match = getShiftEventMatch_('Shift 3', mins, 'keluar');
+      if (shift3Match.matches) return 'Shift 3';
+    }
+
+    // Prioritas khusus Shift 3 MASUK (malam 21:00-23:59).
+    if (type === 'masuk' && mins >= 21 * 60) {
+      const shift3Match = getShiftEventMatch_('Shift 3', mins, 'masuk');
+      if (shift3Match.matches) return 'Shift 3';
+    }
+
+    // Fallback: ambil shift dengan jarak terdekat ke waktu referensi shift.
+    let bestLabel = 'Shift 1';
+    let bestDistance = Infinity;
+
+    for (let i = 0; i < labels.length; i++) {
+      const match = getShiftEventMatch_(labels[i], mins, type);
+      if (!match.matches) continue;
+      if (match.distance < bestDistance) {
+        bestDistance = match.distance;
+        bestLabel = labels[i];
+      }
+    }
+
+    return bestLabel;
   } catch(e) {
-    return '';
+    Logger.log('SharedLib.detectShift: failed — ' + e.message);
+    return 'Shift 1';
   }
 }
 
 // ---- SHIFT CONFIG & KETERLAMBATAN UTILITIES ----
 
-// Jam standar shift dalam menit sejak 00:00
-// Shift 1 : 06:01 – 14:00
-// Shift 2 : 14:01 – 22:00
-// Shift 3 : 22:01 – 06:00 (lintas tengah malam)
+// Jam standar shift dalam menit sejak 00:00.
+// Aturan operasional:
+// - Masuk valid mulai 1 jam sebelum shift dimulai.
+// - Keluar valid sampai 2 jam setelah shift selesai.
+// - Jika masuk setelah jam mulai => telat.
+// - Jika keluar sebelum jam selesai => pulang cepat.
 const SHIFT_CONFIG = {
-  'Shift 1': { startTotal: 6 * 60 + 1,  endTotal: 14 * 60 + 0  },  // 361  – 840
-  'Shift 2': { startTotal: 14 * 60 + 1, endTotal: 22 * 60 + 0  },  // 841  – 1320
-  'Shift 3': { startTotal: 22 * 60 + 1, endTotal: 6 * 60 + 0   }   // 1321 – 360  (cross-midnight)
+  'Shift 1': { startTotal: 6 * 60 + 0,  endTotal: 13 * 60 + 59, preStartMinutes: 60, postEndMinutes: 120, crossMidnight: false },
+  'Shift 2': { startTotal: 14 * 60 + 0, endTotal: 21 * 60 + 59, preStartMinutes: 60, postEndMinutes: 120, crossMidnight: false },
+  'Shift 3': { startTotal: 22 * 60 + 0, endTotal: 5 * 60 + 59,  preStartMinutes: 60, postEndMinutes: 120, crossMidnight: true },
+  'Non Shift 08:00-16:00': { startTotal: 8 * 60 + 0, endTotal: 16 * 60 + 0, preStartMinutes: 60, postEndMinutes: 120, crossMidnight: false },
+  'Non Shift 10:00-18:00': { startTotal: 10 * 60 + 0, endTotal: 18 * 60 + 0, preStartMinutes: 60, postEndMinutes: 120, crossMidnight: false }
 };
 
-/**
- * Konversi string jam "HH:MM" atau "HH:MM:SS" atau Date ke menit sejak 00:00.
- * @param {string|Date} value
- * @returns {number|null}
- */
+const SHIFT_ALIASES = {
+  'SHIFT1': 'Shift 1',
+  'SHIFT 1': 'Shift 1',
+  'SHIFT2': 'Shift 2',
+  'SHIFT 2': 'Shift 2',
+  'SHIFT3': 'Shift 3',
+  'SHIFT 3': 'Shift 3',
+  'NONSHIFT08': 'Non Shift 08:00-16:00',
+  'NON SHIFT 08': 'Non Shift 08:00-16:00',
+  'NON SHIFT 08:00-16:00': 'Non Shift 08:00-16:00',
+  'NONSHIFT 08:00-16:00': 'Non Shift 08:00-16:00',
+  '08:00-16:00': 'Non Shift 08:00-16:00',
+  '08.00-16.00': 'Non Shift 08:00-16:00',
+  'NONSHIFT10': 'Non Shift 10:00-18:00',
+  'NON SHIFT 10': 'Non Shift 10:00-18:00',
+  'NON SHIFT 10:00-18:00': 'Non Shift 10:00-18:00',
+  'NONSHIFT 10:00-18:00': 'Non Shift 10:00-18:00',
+  '10:00-18:00': 'Non Shift 10:00-18:00',
+  '10.00-18.00': 'Non Shift 10:00-18:00'
+};
+
+function normalizeShiftLabel(shiftLabel) {
+  const raw = asText(shiftLabel).trim();
+  if (!raw) return '';
+  const compact = raw.toUpperCase().replace(/[_\s]+/g, ' ');
+  return SHIFT_ALIASES[compact] || SHIFT_ALIASES[compact.replace(/\s+/g, '')] || raw;
+}
+
+function getShiftDefinition_(shiftLabel) {
+  const normalized = normalizeShiftLabel(shiftLabel);
+  return SHIFT_CONFIG[normalized] || null;
+}
+
+function getShiftRange_(shiftLabel) {
+  const cfg = getShiftDefinition_(shiftLabel);
+  if (!cfg) return null;
+  const startAbs = cfg.startTotal;
+  const endAbs = cfg.crossMidnight || cfg.endTotal < cfg.startTotal
+    ? cfg.endTotal + 24 * 60
+    : cfg.endTotal;
+  return {
+    label: normalizeShiftLabel(shiftLabel),
+    startAbs: startAbs,
+    endAbs: endAbs,
+    preStartMinutes: cfg.preStartMinutes || 0,
+    postEndMinutes: cfg.postEndMinutes || 0,
+    crossMidnight: !!cfg.crossMidnight
+  };
+}
+
+function getShiftEventMatch_(shiftLabel, minute, eventType) {
+  const range = getShiftRange_(shiftLabel);
+  if (!range || minute === null || minute === undefined) {
+    return { matches: false, distance: Infinity, actualAbs: null };
+  }
+
+  const type = eventType === 'keluar' ? 'keluar' : 'masuk';
+  const windowStart = type === 'masuk'
+    ? range.startAbs - range.preStartMinutes
+    : range.startAbs;
+  const windowEnd = type === 'keluar'
+    ? range.endAbs + range.postEndMinutes
+    : range.endAbs;
+  const refPoint = type === 'masuk' ? range.startAbs : range.endAbs;
+
+  const candidates = [minute, minute + 24 * 60];
+  let bestActualAbs = null;
+  let bestDistance = Infinity;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const actualAbs = candidates[i];
+    if (actualAbs < windowStart || actualAbs > windowEnd) continue;
+    const distance = Math.abs(actualAbs - refPoint);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestActualAbs = actualAbs;
+    }
+  }
+
+  return {
+    matches: bestActualAbs !== null,
+    distance: bestDistance,
+    actualAbs: bestActualAbs
+  };
+}
+
 function timeStrToMinutes(value) {
   try {
     if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
-      return value.getHours() * 60 + value.getMinutes();
+      const parts = Utilities.formatDate(value, 'Asia/Jakarta', 'HH:mm').split(':');
+      return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
     }
     const text = asText(value).trim();
     const match = text.match(/(\d{1,2}):(\d{2})/);
@@ -329,6 +792,203 @@ function timeStrToMinutes(value) {
   } catch(e) {
     Logger.log('SharedLib.timeStrToMinutes: failed — ' + e.message);
     return null;
+  }
+}
+
+function normalizeTimeValue(value) {
+  try {
+    if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+      return Utilities.formatDate(value, 'Asia/Jakarta', 'HH:mm:ss');
+    }
+    const text = asText(value).trim();
+    const match = text.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (!match) return '';
+    return (
+      String(parseInt(match[1], 10)).padStart(2, '0') + ':' +
+      String(parseInt(match[2], 10)).padStart(2, '0') + ':' +
+      String(parseInt(match[3] || '0', 10)).padStart(2, '0')
+    );
+  } catch(e) {
+    Logger.log('SharedLib.normalizeTimeValue: failed - ' + e.message);
+    return '';
+  }
+}
+
+function compareTimeValues(a, b) {
+  const minuteA = timeStrToMinutes(a);
+  const minuteB = timeStrToMinutes(b);
+  if (minuteA === null || minuteB === null) {
+    return normalizeTimeValue(a).localeCompare(normalizeTimeValue(b));
+  }
+  if (minuteA < minuteB) return -1;
+  if (minuteA > minuteB) return 1;
+  return normalizeTimeValue(a).localeCompare(normalizeTimeValue(b));
+}
+
+function isMinuteInRange(minute, startMinute, endMinute) {
+  if (minute === null || minute === undefined) return false;
+  if (startMinute <= endMinute) return minute >= startMinute && minute <= endMinute;
+  return minute >= startMinute || minute <= endMinute;
+}
+
+function isMinuteInRanges(minute, ranges) {
+  if (!Array.isArray(ranges)) return false;
+  return ranges.some(function(range) {
+    return isMinuteInRange(minute, range.start, range.end);
+  });
+}
+
+function matchesShiftEventTime(shiftLabel, timeValue, eventType) {
+  const minute = timeStrToMinutes(timeValue);
+  if (minute === null) return false;
+  return getShiftEventMatch_(shiftLabel, minute, eventType === 'keluar' ? 'keluar' : 'masuk').matches;
+}
+
+function inferShiftByEventTime(timeValue, eventType) {
+  const minute = timeStrToMinutes(timeValue);
+  if (minute === null) return '';
+  const labels = ['Shift 1', 'Shift 2', 'Shift 3'];
+  let bestLabel = '';
+  let bestDistance = Infinity;
+  for (let i = 0; i < labels.length; i++) {
+    const match = getShiftEventMatch_(labels[i], minute, eventType === 'keluar' ? 'keluar' : 'masuk');
+    if (!match.matches) continue;
+    if (match.distance < bestDistance) {
+      bestDistance = match.distance;
+      bestLabel = labels[i];
+    }
+  }
+  return bestLabel;
+}
+
+function resolveFactoryWorkDate(tanggal, timeValue, eventType) {
+  try {
+    const parseOptions = getFactoryOperationalDateParsingOptions_();
+    const baseDate = parseIsoDate(tanggal) || parseSheetDate(tanggal, parseOptions);
+    const normalizedDate = baseDate ? formatDate(baseDate) : asText(tanggal).trim();
+    const shiftLabel = detectShift(timeValue, eventType);
+    const minute = timeStrToMinutes(timeValue);
+    const shiftDef = getShiftDefinition_(shiftLabel);
+
+    if (!baseDate) {
+      return { tanggal: normalizedDate, tanggalValue: null, shiftLabel: shiftLabel, source: 'raw' };
+    }
+
+    if (shiftLabel === 'Shift 3' && shiftDef && minute !== null && minute < shiftDef.startTotal) {
+      const previousDate = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+      previousDate.setDate(previousDate.getDate() - 1);
+      return {
+        tanggal: formatDate(previousDate),
+        tanggalValue: new Date(previousDate.getFullYear(), previousDate.getMonth(), previousDate.getDate()),
+        shiftLabel: shiftLabel,
+        source: 'shift3_prev_day'
+      };
+    }
+
+    return {
+      tanggal: normalizedDate,
+      tanggalValue: new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate()),
+      shiftLabel: shiftLabel,
+      source: 'same_day'
+    };
+  } catch (e) {
+    Logger.log('SharedLib.resolveFactoryWorkDate: failed - ' + e.message);
+    return {
+      tanggal: asText(tanggal).trim(),
+      tanggalValue: null,
+      shiftLabel: detectShift(timeValue, eventType),
+      source: 'error'
+    };
+  }
+}
+
+function resolveFactoryEventContext(tanggal, nik, timeValue, eventType, jadwalCache) {
+  try {
+    const targetNik = asText(nik).trim().replace(/\.0$/, '');
+    if (targetNik) {
+      return resolveRecapShiftContext(tanggal, targetNik, timeValue, eventType, jadwalCache);
+    }
+    return resolveFactoryWorkDate(tanggal, timeValue, eventType);
+  } catch (e) {
+    Logger.log('SharedLib.resolveFactoryEventContext: failed - ' + e.message);
+    return resolveFactoryWorkDate(tanggal, timeValue, eventType);
+  }
+}
+
+function getExpectedShiftForNikOnDate(nik, tanggal) {
+  try {
+    if (typeof getKaryawanExpectedForDate !== 'function') return '';
+    const expectedList = getKaryawanExpectedForDate(tanggal);
+    if (!Array.isArray(expectedList)) return '';
+    const targetNik = asText(nik).trim();
+    for (let i = 0; i < expectedList.length; i++) {
+      if (asText(expectedList[i].nik).trim() === targetNik) {
+        return asText(expectedList[i].shift).trim();
+      }
+    }
+    return '';
+  } catch(e) {
+    Logger.log('SharedLib.getExpectedShiftForNikOnDate: failed - ' + e.message);
+    return '';
+  }
+}
+
+function resolveRecapShiftContext(tanggal, nik, timeValue, eventType, jadwalCache) {
+  try {
+    const parseOptions = getFactoryOperationalDateParsingOptions_();
+    const baseDate = parseIsoDate(tanggal) || parseSheetDate(tanggal, parseOptions);
+    if (!baseDate) {
+      return { tanggal: asText(tanggal).trim(), tanggalValue: null, shiftLabel: inferShiftByEventTime(timeValue, eventType), source: 'raw' };
+    }
+
+    const currentDate = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+    const previousDate = new Date(currentDate);
+    previousDate.setDate(previousDate.getDate() - 1);
+
+    const currentLabel = formatDate(currentDate);
+    const previousLabel = formatDate(previousDate);
+
+    // Gunakan jadwalCache jika tersedia (batch mode), fallback ke sheet read
+    function getExpected(tanggalLabel) {
+      if (jadwalCache && typeof jadwalCache.getForDate === 'function') {
+        return jadwalCache.getForDate(tanggalLabel);
+      }
+      return getKaryawanExpectedForDate(tanggalLabel);
+    }
+
+    function getShiftForNik(expectedList) {
+      const targetNik = asText(nik).trim();
+      for (let i = 0; i < expectedList.length; i++) {
+        if (asText(expectedList[i].nik).trim() === targetNik) return asText(expectedList[i].shift).trim();
+      }
+      return '';
+    }
+
+    const expectedToday = getShiftForNik(getExpected(currentLabel));
+    const expectedPrev  = getShiftForNik(getExpected(previousLabel));
+    const inferredShift = inferShiftByEventTime(timeValue, eventType);
+    const minute = timeStrToMinutes(timeValue);
+
+    if (eventType === 'keluar') {
+      if (expectedPrev === 'Shift 3' && matchesShiftEventTime('Shift 3', timeValue, 'keluar')) {
+        return { tanggal: previousLabel, tanggalValue: new Date(previousDate.getFullYear(), previousDate.getMonth(), previousDate.getDate()), shiftLabel: 'Shift 3', source: 'jadwal_prev' };
+      }
+      if (expectedToday && matchesShiftEventTime(expectedToday, timeValue, 'keluar')) {
+        return { tanggal: currentLabel, tanggalValue: new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()), shiftLabel: expectedToday, source: 'jadwal_today' };
+      }
+      if (inferredShift === 'Shift 3' && minute !== null && minute <= (7 * 60)) {
+        return { tanggal: previousLabel, tanggalValue: new Date(previousDate.getFullYear(), previousDate.getMonth(), previousDate.getDate()), shiftLabel: 'Shift 3', source: 'infer_prev' };
+      }
+      return { tanggal: currentLabel, tanggalValue: new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()), shiftLabel: expectedToday || inferredShift || '', source: 'default_keluar' };
+    }
+
+    if (expectedToday && matchesShiftEventTime(expectedToday, timeValue, 'masuk')) {
+      return { tanggal: currentLabel, tanggalValue: new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()), shiftLabel: expectedToday, source: 'jadwal_today' };
+    }
+    return { tanggal: currentLabel, tanggalValue: new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()), shiftLabel: expectedToday || inferredShift || '', source: 'default_masuk' };
+  } catch(e) {
+    Logger.log('SharedLib.resolveRecapShiftContext: failed - ' + e.message);
+    return { tanggal: asText(tanggal).trim(), tanggalValue: null, shiftLabel: '', source: 'error' };
   }
 }
 
@@ -341,7 +1001,7 @@ function timeStrToMinutes(value) {
  */
 function getLateMinutes(jamMasukValue, shiftLabel) {
   try {
-    const cfg = SHIFT_CONFIG[shiftLabel];
+    const cfg = getShiftDefinition_(shiftLabel);
     if (!cfg) return null;
     const actual = timeStrToMinutes(jamMasukValue);
     if (actual === null) return null;
@@ -375,28 +1035,32 @@ function getLateCategory(minutes) {
  */
 function getOvertimeMinutes(jamKeluarValue, shiftLabel) {
   try {
-    const cfg = SHIFT_CONFIG[shiftLabel];
-    if (!cfg) return 0;
+    const range = getShiftRange_(shiftLabel);
+    if (!range) return 0;
     const actual = timeStrToMinutes(jamKeluarValue);
     if (actual === null) return 0;
-
-    // Shift 3 lintas tengah malam: jam keluar bisa < 360 (sebelum 06:00)
-    // Normalkan: jika shift 3 dan jam keluar < startTotal (22:01),
-    // tambah 24*60 agar bisa dibandingkan lurus
-    let effectiveActual = actual;
-    let effectiveEnd    = cfg.endTotal;
-    if (shiftLabel === 'Shift 3') {
-      // endTotal = 360 (06:00). Kita pakai frame: start=1321, end=360+1440=1800
-      effectiveEnd = cfg.endTotal + 24 * 60;  // 360 + 1440 = 1800
-      if (actual < cfg.startTotal) {
-        effectiveActual = actual + 24 * 60;   // mis. 05:30 → 05:30 + 24h = 1770
-      }
-    }
-
-    const over = effectiveActual - effectiveEnd;
+    const match = getShiftEventMatch_(shiftLabel, actual, 'keluar');
+    const effectiveActual = match.actualAbs !== null ? match.actualAbs : actual;
+    const over = effectiveActual - range.endAbs;
     return over > 0 ? over : 0;
   } catch(e) {
     Logger.log('SharedLib.getOvertimeMinutes: failed — ' + e.message);
+    return 0;
+  }
+}
+
+function getEarlyLeaveMinutes(jamKeluarValue, shiftLabel) {
+  try {
+    const range = getShiftRange_(shiftLabel);
+    if (!range) return 0;
+    const actual = timeStrToMinutes(jamKeluarValue);
+    if (actual === null) return 0;
+    const match = getShiftEventMatch_(shiftLabel, actual, 'keluar');
+    const effectiveActual = match.actualAbs !== null ? match.actualAbs : actual;
+    const early = range.endAbs - effectiveActual;
+    return early > 0 ? early : 0;
+  } catch (e) {
+    Logger.log('SharedLib.getEarlyLeaveMinutes: failed - ' + e.message);
     return 0;
   }
 }
@@ -416,15 +1080,84 @@ function formatDurationMinutes(minutes) {
 
 // ---- LOCKING ----
 
+/**
+ * Lock GLOBAL — dipakai untuk operasi berat seperti repair & jadwal.
+ * JANGAN gunakan untuk gate scan (pakai withCardLock).
+ */
 function withDocumentLock(work) {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) {
-    return { ok: false, msg: 'Sistem sedang memproses scan lain. Coba lagi beberapa detik.' };
+  const MAX_ATTEMPTS = 3;
+  const LOCK_WAIT_MS = 30000;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const lock = LockService.getScriptLock();
+    if (lock.tryLock(LOCK_WAIT_MS)) {
+      try {
+        return work();
+      } finally {
+        lock.releaseLock();
+      }
+    }
+    if (attempt < MAX_ATTEMPTS) {
+      Utilities.sleep(500 + attempt * 300);
+    }
   }
+  return { ok: false, msg: 'Sistem sedang sibuk. Silakan coba lagi.' };
+}
+
+/**
+ * Lock PER KARTU — untuk gate scan masuk/keluar.
+ *
+ * Cara kerja:
+ *   1. Ambil global lock hanya ~200ms untuk check-then-set per-card lock
+ *      di PropertiesService (atomic, tidak bisa race condition).
+ *   2. Lepas global lock → kartu LAIN bisa scan paralel sekarang.
+ *   3. Jalankan fn() tanpa global lock.
+ *   4. Selesai → hapus card lock.
+ *
+ * Hasil: 100 kartu berbeda = 100 proses paralel, tidak saling block.
+ * Global lock hanya dipakai 100–200ms, bukan 1–5 detik.
+ *
+ * @param {string} cardNo - Nomor kartu / NIK
+ * @param {function} fn   - Fungsi yang dijalankan setelah card lock berhasil
+ * @returns {*} Hasil dari fn(), atau { ok:false, msg } jika gagal dapat lock
+ */
+function withCardLock(cardNo, fn) {
+  const CARD_LOCK_TTL_MS  = 90 * 1000;  // lock expire otomatis setelah 90 detik
+  const GLOBAL_LOCK_MS    = 5000;        // max tunggu global lock (hanya untuk set props)
+  const lockKey           = 'CKLK_' + String(cardNo).replace(/[^A-Z0-9]/gi, '_');
+  const ps                = PropertiesService.getScriptProperties();
+
+  // Step 1: Global lock sebentar hanya untuk atomic check-then-set
+  const globalLock = LockService.getScriptLock();
+  if (!globalLock.tryLock(GLOBAL_LOCK_MS)) {
+    return { ok: false, msg: 'Sistem terlalu sibuk, coba scan ulang.' };
+  }
+
+  let cardLocked = false;
   try {
-    return work();
+    const existing = ps.getProperty(lockKey);
+    if (existing) {
+      const ageMs = Date.now() - parseInt(existing, 10);
+      if (ageMs < CARD_LOCK_TTL_MS) {
+        // Kartu ini sedang diproses oleh request lain
+        return { ok: false, msg: 'Kartu sedang diproses, coba scan ulang dalam beberapa detik.' };
+      }
+      // Lock lama sudah expire (script crash sebelumnya), lanjut
+    }
+    ps.setProperty(lockKey, String(Date.now()));
+    cardLocked = true;
   } finally {
-    lock.releaseLock();
+    globalLock.releaseLock(); // Lepas global lock secepat mungkin
+  }
+
+  // Step 2: Jalankan operasi scan TANPA global lock
+  // → kartu lain bisa scan paralel sekarang
+  try {
+    return fn();
+  } finally {
+    if (cardLocked) {
+      try { ps.deleteProperty(lockKey); } catch(e) {}
+    }
   }
 }
 
@@ -433,7 +1166,7 @@ function withDocumentLock(work) {
 function assertCard(noKartuMK) {
   const no = normalizeCard(noKartuMK);
   if (!no) throw new Error('Nomor kartu MK kosong.');
-  if (!/^[A-Z0-9_-]{3,32}$/.test(no)) throw new Error('Format nomor kartu MK / NIK tidak valid.');
+  if (!/^[A-Z0-9_-]{3,32}$/.test(no)) throw new Error('Format nomor kartu MK tidak valid.');
   return no;
 }
 
@@ -516,7 +1249,87 @@ function getRecapStatus(jamMasuk, jamKeluar) {
 }
 
 function makeRecapKey(tanggal, nik) {
-  return asText(tanggal).trim() + '|' + asText(nik).trim();
+  const parsedDate = parseSheetDate(tanggal, getFactoryOperationalDateParsingOptions_());
+  const normDate = parsedDate ? formatDate(parsedDate) : asText(tanggal).trim();
+  const normNik = asText(nik).trim().replace(/\.0$/, '');
+  return normDate + '|' + normNik;
+}
+
+function getRecapSourceSnapshot(nik, recapTanggal) {
+  try {
+    const targetNik = asText(nik).trim();
+    const targetTanggal = asText(recapTanggal).trim();
+    const snapshot = {
+      nama: '',
+      dept: '',
+      jabatan: '',
+      jamMasuk: '',
+      jamKeluar: '',
+      noKartuMK: '',
+      noLoker: ''
+    };
+
+    if (!targetNik || !targetTanggal) return snapshot;
+
+    const master = getKaryawanByNIK(targetNik) || {};
+    snapshot.nama = asText(master.nama);
+    snapshot.dept = asText(master.dept);
+    snapshot.jabatan = asText(master.jabatan);
+
+    function absorbRow(row, eventType) {
+      const rowNik = asText(row[1]).trim();
+      if (rowNik !== targetNik) return;
+
+      const rowTanggal = parseSheetDate(row[3]) ? formatDate(parseSheetDate(row[3])) : asText(row[3]).trim();
+      const rowJam = normalizeTimeValue(row[4]);
+      if (!rowTanggal || !rowJam) return;
+
+      const recapContext = resolveRecapShiftContext(rowTanggal, targetNik, rowJam, eventType);
+      if (asText(recapContext.tanggal).trim() !== targetTanggal) return;
+
+      const rowNama = asText(row[2]).trim();
+      const rowKartu = normalizeCard(row[0]);
+      const rowLoker = asText(row[6] || '').trim();
+
+      if (!snapshot.nama && rowNama) snapshot.nama = rowNama;
+      if (!snapshot.noKartuMK && rowKartu) snapshot.noKartuMK = rowKartu;
+      if (!snapshot.noLoker && rowLoker) snapshot.noLoker = rowLoker;
+
+      if (eventType === 'masuk') {
+        if (!snapshot.jamMasuk || compareTimeValues(rowJam, snapshot.jamMasuk) < 0) {
+          snapshot.jamMasuk = rowJam;
+          if (rowKartu) snapshot.noKartuMK = rowKartu;
+          if (rowLoker) snapshot.noLoker = rowLoker;
+        }
+        return;
+      }
+
+      if (!snapshot.jamKeluar || compareTimeValues(rowJam, snapshot.jamKeluar) > 0) {
+        snapshot.jamKeluar = rowJam;
+        if (!snapshot.noKartuMK && rowKartu) snapshot.noKartuMK = rowKartu;
+        if (!snapshot.noLoker && rowLoker) snapshot.noLoker = rowLoker;
+      }
+    }
+
+    const masukData = getSheet(SHEET_MASUK_PABRIK).getDataRange().getValues();
+    for (let i = 1; i < masukData.length; i++) absorbRow(masukData[i], 'masuk');
+
+    const keluarData = getSheet(SHEET_KELUAR_PABRIK).getDataRange().getValues();
+    for (let i = 1; i < keluarData.length; i++) absorbRow(keluarData[i], 'keluar');
+
+    return snapshot;
+  } catch(e) {
+    Logger.log('SharedLib.getRecapSourceSnapshot: failed - ' + e.message);
+    return {
+      nama: '',
+      dept: '',
+      jabatan: '',
+      jamMasuk: '',
+      jamKeluar: '',
+      noKartuMK: '',
+      noLoker: ''
+    };
+  }
 }
 
 // ---- KARYAWAN LOOKUP ----
@@ -528,15 +1341,16 @@ function getKaryawanMapByNIK() {
 
   for (let i = 1; i < data.length; i++) {
     const nik = asText(data[i][0]).trim();
-    if (!nik) continue;
+    const nama = asText(data[i][1]).trim();
+    if (!nik || !nama) continue; // Skip ghost rows or empty NIK/Nama
     map[nik] = {
       nik,
-      nama: asText(data[i][1]),
-      type: asText(data[i][2]),
-      dept: asText(data[i][3]),
-      jabatan: asText(data[i][4]),
-      userLevel: asText(data[i][5]).toUpperCase(),
-      password: asText(data[i][6])
+      nama: nama,
+      type: asText(data[i][2]).trim() || 'TIDAK_ADA_DATA',
+      dept: asText(data[i][3]).trim() || 'TIDAK_ADA_DATA',
+      jabatan: asText(data[i][4]).trim() || 'TIDAK_ADA_DATA',
+      userLevel: asText(data[i][5]).toUpperCase().trim() || 'USER',
+      password: asText(data[i][6]).trim()
     };
   }
 
@@ -551,13 +1365,15 @@ function getKaryawanByNIK(nik) {
   const data  = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (asText(data[i][0]).trim() === target) {
+      const nama = asText(data[i][1]).trim();
+      if (!nama) continue; // Skip ghost rows
       return {
-        nik: asText(data[i][0]),
-        nama: asText(data[i][1]),
-        type: asText(data[i][2]),
-        dept: asText(data[i][3]),
-        jabatan: asText(data[i][4]),
-        userLevel: asText(data[i][5]).toUpperCase()
+        nik: target,
+        nama: nama,
+        type: asText(data[i][2]).trim() || 'TIDAK_ADA_DATA',
+        dept: asText(data[i][3]).trim() || 'TIDAK_ADA_DATA',
+        jabatan: asText(data[i][4]).trim() || 'TIDAK_ADA_DATA',
+        userLevel: asText(data[i][5]).toUpperCase().trim() || 'USER'
       };
     }
   }
@@ -684,49 +1500,9 @@ function include(filename) {
 }
 
 // ---- ROUTING / CONFIG ----
-
-/**
- * setupModuleUrls()
- * Jalankan SEKALI dari GAS Editor untuk mengisi / memperbarui CONFIG_MODUL
- * dengan URL deployment yang benar.
- *
- * HOME_PORTAL bersifat frozen — URL-nya tidak pernah berubah.
- * Modul lain (GATE_PABRIK, AREA_KERJA, REPORT) bisa diperbarui
- * jika deployment ID berubah, tapi URL tetap selama deployment ID sama.
- */
-function setupModuleUrls() {
-  const URLS = {
-    HOME_PORTAL:  'https://script.google.com/macros/s/AKfycbzoALF7oD-WRuyhwp22pdQ6l3fGLRJuQ-OSnb5AizG-MBcOul5m74z6Xtq-hQ5IEsqX/exec',
-    GATE_PABRIK:  'https://script.google.com/macros/s/AKfycbxS2rvxwlxbUpsNvBjAl7gbcg-NEBrIuhGpGKUX402S_Z-n94Im1U8QWQ4pzSlacbJk0Q/exec',
-    AREA_KERJA:   'https://script.google.com/macros/s/AKfycbzvhK7-WhHfh20VkHUiJqI8vWUNYrt2H783ktYogOy-W6Oj761lRy8Ilj4ZHSzBSjhMSQ/exec',
-    REPORT:       'https://script.google.com/macros/s/AKfycbxNp_aCwyOxg0tymk2oeJViieNXGTj3P6wR_3uDgRMm1_AT8gvxd01WAUy2SdW6IH3a/exec',
-  };
-
-  const ss = getSpreadsheet();
-  let sheet = ss.getSheetByName('CONFIG_MODUL');
-  if (!sheet) {
-    sheet = ss.insertSheet('CONFIG_MODUL');
-    sheet.appendRow(['NAMA_MODUL', 'LINK_MODUL']);
-    sheet.getRange('A1:B1').setFontWeight('bold');
-  }
-
-  const data = sheet.getDataRange().getValues();
-  const rowMap = {};
-  for (let i = 1; i < data.length; i++) {
-    rowMap[asText(data[i][0]).toUpperCase()] = i + 1;
-  }
-
-  for (const [key, url] of Object.entries(URLS)) {
-    if (rowMap[key]) {
-      sheet.getRange(rowMap[key], 2).setValue(url);
-    } else {
-      sheet.appendRow([key, url]);
-    }
-  }
-
-  Logger.log('CONFIG_MODUL updated:\n' + Object.entries(URLS).map(([k, v]) => `  ${k}: ${v}`).join('\n'));
-  try { SpreadsheetApp.getUi().alert('CONFIG_MODUL berhasil diperbarui!'); } catch(e) { /* tidak tersedia di Script Editor */ }
-}
+// CONFIG_MODUL sheet dikelola SEPENUHNYA oleh: npm run deploy
+// Jangan pernah tulis URL ke CONFIG_MODUL secara manual dari GAS Editor.
+// Source of truth satu-satunya: scripts/module-config.json
 
 function getModuleUrls() {
   try {

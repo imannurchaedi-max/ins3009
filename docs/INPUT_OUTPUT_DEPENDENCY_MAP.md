@@ -1,0 +1,109 @@
+# Input Output Dependency Map
+
+Dokumen ini merangkum kontrak input, output, dependency sheet, dan caller untuk flow utama. Fokusnya adalah maintenance cepat: saat ada bug atau perubahan, kita bisa langsung melihat jalur data tanpa membaca seluruh implementasi.
+
+## Konvensi Baca
+
+- `Input` = parameter dari web, Android, atau helper internal
+- `Output` = payload balik yang dipakai caller
+- `Read Sheet` = sheet yang dibaca
+- `Write Sheet` = sheet yang ditulis
+- `Caller` = pemanggil utama yang perlu dicek saat bug muncul
+
+## Session & Auth
+
+| Operation | Caller | Input | Output | Read Sheet | Write Sheet | Dependency Penting |
+|---|---|---|---|---|---|---|
+| `verifyLogin(nik, password)` | `app.html::handleLoginSubmit()`, `android_app/lib/providers/session_provider.dart` | `nik`, `password` | `ok`, `msg`, `karyawan`, `depts` | `KARYAWAN` | - | password kosong masih valid untuk user tertentu; payload user dibentuk oleh `makeKaryawanPayload()` |
+| `verifySession(nik/sessionToken)` | `app.html::restoreSavedSession()`, Android bootstrap session | `nik` atau `sessionToken` | `ok`, `msg`, `karyawan`, `depts` | `KARYAWAN` | - | session Android memakai `sessionToken || nik` |
+| `searchKaryawan(query)` | web search, Android helper tertentu | `query` | `ok`, `data[]` | `KARYAWAN` | - | minimum length query harus valid |
+
+## Gate / Pabrik
+
+| Operation | Caller | Input | Output | Read Sheet | Write Sheet | Dependency Penting |
+|---|---|---|---|---|---|---|
+| `getBindingStatus(noKartuMK)` | web gate, Android gate | `noKartuMK` | `ok`, `status`, `nik`, `nama`, `dept`, `jabatan` | `BINDING_KARTU_MK`, `KARYAWAN` | - | card harus lolos `assertCard()` / `normalizeCard()` |
+| `bindKartu(noKartuMK, nik, loker, lat, lng)` | web `confirmMasuk()`, Android gate | serial kartu, `nik`, `loker`, opsional geo | `ok`, `msg`, binding context | `KARYAWAN`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | `REGISTRASI SAAT MASUK PABRIK`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | memakai `withCardLock()` dan `safeUpdateRecapAbsen()` |
+| `releaseKartu(noKartuMK, loker, lat, lng)` | web `confirmKeluar()`, Android gate | serial kartu, `loker`, opsional geo | `ok`, `msg`, release context | `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | `REGISTRASI SAAT KELUAR PABRIK`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | status kartu harus `BOUND`; keluar bergantung binding aktif |
+
+## Area Kerja
+
+| Operation | Caller | Input | Output | Read Sheet | Write Sheet | Dependency Penting |
+|---|---|---|---|---|---|---|
+| `scanAreaKerja(noKartuMK, tujuan, catatan, forceMode)` | web area, Android area | serial kartu, `tujuan`, `catatan`, `forceMode` | `ok`, `inout`, `karyawan`, `waktu`, `area`, `msg` | `BINDING_KARTU_MK`, `KARYAWAN`, `REGISTRASI MASUK KELUAR AREA KERJA`, `ABSEN IN OUT MK` | `REGISTRASI MASUK KELUAR AREA KERJA` | internal user harus masih `DI DALAM` pabrik; state IN/OUT area diturunkan dari log hari ini |
+| `getRecentAreaLogs(limit)` | web area, Android area log | `limit` | `ok`, `data[]` | `REGISTRASI MASUK KELUAR AREA KERJA` | - | hanya pembacaan log terbaru |
+
+## Dashboard Operasional & Kehadiran
+
+| Operation | Caller | Input | Output | Read Sheet | Write Sheet | Dependency Penting |
+|---|---|---|---|---|---|---|
+| `getDashboardData(basis, basisValue, deptFilter, typeFilter)` | web dashboard area | basis waktu, filter dept/type | `ok`, summary area, `boundList`, `areaPopulation`, `deptPopulation`, `kanbanGroups`, `shiftCoverage` | `ABSEN IN OUT MK`, `REGISTRASI MASUK KELUAR AREA KERJA`, `KARYAWAN` | - | area dashboard menghitung orang `DI DALAM` lalu overlay log area |
+| `getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter, options)` | web kehadiran, Android dashboard | tanggal, filter, `detailLimit`, `anomaliLimit`, `useCache` | `ok`, `summary`, `kehadiranList`, `anomaliList`, total rows | `ABSEN IN OUT MK`, `KARYAWAN`, `JADWAL_SHIFT` | cache script | memakai `CacheService`; shift bisa berasal dari jadwal atau deteksi jam |
+
+## Report
+
+| Operation | Caller | Input | Output | Read Sheet | Write Sheet | Dependency Penting |
+|---|---|---|---|---|---|---|
+| `getAbsenReport(nik, deptFilter, periodType, periodValue, page, pageSize, sortBy, sortDir, search)` | web report, Android absen | identitas/filter/periode/paging | `ok`, rows report, summary, pagination | `ABSEN IN OUT MK`, `KARYAWAN`, `JADWAL_SHIFT` | cache jika ada | periode Android bisa di-derive dari `startDate/endDate` oleh `resolveAndroidAbsenPeriod_()` |
+| `getAreaActivityReport(nik, deptFilter, periodType, periodValue, page, pageSize, sortBy, sortDir, search)` | web report area, Android absen | identitas/filter/periode/paging | `ok`, rows activity area, summary, pagination | `REGISTRASI MASUK KELUAR AREA KERJA`, `KARYAWAN` | cache jika ada | data area tidak boleh memperbaiki gate recap sendiri |
+
+## Jadwal Shift
+
+| Operation | Caller | Input | Output | Read Sheet | Write Sheet | Dependency Penting |
+|---|---|---|---|---|---|---|
+| `saveJadwalShift(...)` | web jadwal | `nik`, `shift`, `tanggalMulai`, `tanggalSelesai` | `ok`, `msg` | `JADWAL_SHIFT`, `KARYAWAN` | `JADWAL_SHIFT` | mengubah coverage dashboard kehadiran |
+| `deleteJadwalShift(rowIndex)` | web jadwal | `rowIndex` | `ok`, `msg` | `JADWAL_SHIFT` | `JADWAL_SHIFT` | row index harus sesuai sheet aktif |
+| `getJadwalShift(deptFilter)` | web jadwal | optional dept | `ok`, `data[]` | `JADWAL_SHIFT`, `KARYAWAN` | - | dipakai untuk admin review |
+| `getKaryawanExpectedForDate(tanggal)` | helper internal dashboard | `tanggal` | daftar expected per shift | `JADWAL_SHIFT`, `KARYAWAN` | - | dipakai oleh `getKehadiranDashboard()` |
+
+## Android Router Contract
+
+### Entry point
+
+- `active/HOME_PORTAL/Code.js::doPost()`
+
+### Kontrak minimum request
+
+```json
+{
+  "apiKey": "DAM_ANDROID_SECURE_KEY_2026",
+  "action": "verifyLogin"
+}
+```
+
+### Action aktif yang harus dijaga sinkron
+
+- `verifyLogin`
+- `verifySession`
+- `getBindingStatus`
+- `bindKartu`
+- `releaseKartu`
+- `scanAreaKerja`
+- `getDashboardData`
+- `getKehadiranDashboard`
+- `getRecentAreaLogs`
+- `getAreaActivityReport`
+- `getAbsenReport`
+- `searchKaryawan`
+
+## Sheet Dependency by Domain
+
+| Sheet | Domain | Dipakai oleh |
+|---|---|---|
+| `KARYAWAN` | master user | auth, lookup, dashboard, report, jadwal |
+| `REGISTRASI SAAT MASUK PABRIK` | log gate masuk | `bindKartu()`, rebuild recap |
+| `REGISTRASI SAAT KELUAR PABRIK` | log gate keluar | `releaseKartu()`, rebuild recap |
+| `REGISTRASI MASUK KELUAR AREA KERJA` | log area | `scanAreaKerja()`, `getRecentAreaLogs()`, dashboard area, report area |
+| `BINDING_KARTU_MK` | state kartu aktif | `getBindingStatus()`, `bindKartu()`, `releaseKartu()`, `scanAreaKerja()` |
+| `ABSEN IN OUT MK` | recap turunan | gate, dashboard kehadiran, report absen |
+| `JADWAL_SHIFT` | planning shift | dashboard kehadiran, jadwal CRUD |
+
+## Quick Troubleshooting by Symptom
+
+| Gejala | Cek Pertama |
+|---|---|
+| Login sukses lalu balik ke login | `verifyLogin()`, `verifySession()`, payload session Android/Web |
+| Gate gagal masuk | `getBindingStatus()`, `bindKartu()`, serial scan, status recap hari ini |
+| Area scan gagal walau kartu aktif | `scanAreaKerja()`, status pabrik `DI DALAM`, tujuan area kosong atau tidak |
+| Dashboard kosong / lambat | `getDashboardData()` atau `getKehadiranDashboard()`, filter basis, cache, size payload |
+| Report hasilnya tidak masuk akal | period resolver, filter dept/type, sheet recap dan area log |

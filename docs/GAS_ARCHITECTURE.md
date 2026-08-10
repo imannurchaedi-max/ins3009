@@ -2,9 +2,9 @@
 
 ## Ringkasan
 
-Project ini adalah web app Google Apps Script untuk access control, absensi, dan tracking area kerja PT Daya Anugrah Mulya.
-
-Arsitektur aktif saat ini adalah `True Single-URL Shell`: seluruh UX utama berjalan dari satu GAS project, yaitu `HOME_PORTAL`, dengan satu URL permanen. Child modules masih dipelihara sebagai deployment kompatibilitas dan fallback, tetapi bukan jalur user-facing utama.
+Proyek ini adalah web app Google Apps Script untuk access control, absensi, dan tracking area kerja PT Daya Anugrah Mulya. Sistem ini memiliki dua antarmuka (interface) utama:
+1. **Web App Utama**: Berjalan sebagai `True Single-URL Shell` dari project `HOME_PORTAL`.
+2. **Aplikasi Android Native**: Dibangun dengan Flutter (`android_app/`), terhubung langsung ke backend GAS via HTTP POST (JSON).
 
 ## Jalur Baca Efektif
 
@@ -30,7 +30,7 @@ Yang tidak boleh dipakai sebagai sumber arsitektur aktif:
 - Child modules tetap ikut push/deploy untuk menjaga compatibility deployment, tetapi perubahan arsitektur harus divalidasi dari `HOME_PORTAL` lebih dulu.
 - Satu URL shell utama yang aktif saat ini:
   ```
-  https://script.google.com/macros/s/AKfycbw4I2Vxh_CKH2k1RHCtvqZwJ1fGwyb0LKeC4MPzEoVibhlSF0lSf5sYeuppZ3BBgp-x/exec
+  https://script.google.com/macros/s/AKfycbzVN4Z58pluVPnUG1jBOBc4hLggJjDAlrSekiW9DtkHqvk8rEsSKuhvhWHTbsHbaP8m/exec
   ```
 - URL aktif ini mengikuti `scripts/module-config.json` dan hasil `npm run deploy`.
 
@@ -45,7 +45,7 @@ Proyek ini telah dianalisis menggunakan **Graphify**, yang menghasilkan represen
 
 ```text
 active/HOME_PORTAL/
-|- Code.js              <- doGet() entry point
+|- Code.js              <- doGet() web entry point & doPost() Android API router
 |- SharedLib.gs         <- utility, auth, lookup, sheet access, shift config, registry compatibility
 |- GateFunctions.gs     <- bindKartu, releaseKartu, getBindingStatus, updateRecapAbsen
 |- AreaFunctions.gs     <- scanAreaKerja, getDashboardData, getKehadiranDashboard, getRecentAreaLogs
@@ -68,6 +68,18 @@ active/HOME_PORTAL/
 5. Login baru berjalan lewat `handleLoginSubmit()` -> `verifyLogin()`.
 6. Semua tab di shell aktif berpindah secara lokal, tanpa ganti URL.
 7. Semua operasi backend berjalan lewat `google.script.run` ke GAS project `HOME_PORTAL`.
+
+## Workflow Android App (Flutter)
+
+Aplikasi Android dibangun untuk memudahkan proses *tapping* kartu ID (NFC) oleh Karyawan dan Security langsung dari handphone.
+
+1. **Stack**: Frontend menggunakan Flutter (Dart), Backend menggunakan GAS (`Code.js` -> `doPost`).
+2. **HTTP Router**: `doPost(e)` di `Code.js` menerima payload JSON yang di-*flatten* (terdiri dari `apiKey`, `action`, dan parameter lain). Jika `apiKey` cocok, request akan di-route ke fungsi backend yang sama persis seperti yang digunakan Web App.
+3. **Session**: Setelah fungsi `verifyLogin` berhasil, aplikasi Dart menyimpan data session (Role, NIK, Nama) ke dalam `SharedPreferences`.
+4. **Hardware Integrations**:
+   - `flutter_nfc_kit`: Digunakan untuk membaca UID/Serial kartu MIFARE/RFID dari ID Karyawan saat melakukan *Scan Gate* maupun *Scan Area*.
+   - `geolocator`: Digunakan secara khusus saat *Scan Gate Keluar* untuk memvalidasi posisi latitude/longitude karyawan.
+5. **Handling Redirect (302)**: Google Apps Script Web App `exec` URL selalu melakukan HTTP 302 Redirect. Komunikasi API di Dart *wajib* menggunakan `dart:io HttpClient` untuk memanualisasi handling redirect; `http.post` biasa akan mengubah metode POST menjadi GET sehingga payload JSON hilang di tengah jalan.
 
 ## Workflow Operasional Satu Arah
 

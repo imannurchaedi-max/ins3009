@@ -53,13 +53,15 @@ Folder root masih dapat berisi artefak transisi, tooling, atau file lama. Untuk 
 ## Urutan Baca yang Disarankan
 
 1. `README.md`
-2. `docs/OPERATIONAL_WORKFLOW.md`
-3. `docs/GAS_ARCHITECTURE.md`
-4. `docs/NEURAL_MAPPING.md`
-5. `docs/BLAST_RADIUS.md`
-6. `docs/FUNCTION_MAPPING.md`
-7. `docs/DEPLOYMENT_GUIDE.md`
-8. `active/HOME_PORTAL/`
+2. `docs/MAINTENANCE_DIRECT_ACCESS.md`
+3. `docs/OPERATIONAL_WORKFLOW.md`
+4. `docs/GAS_ARCHITECTURE.md`
+5. `docs/INPUT_OUTPUT_DEPENDENCY_MAP.md`
+6. `docs/NEURAL_MAPPING.md`
+7. `docs/BLAST_RADIUS.md`
+8. `docs/FUNCTION_MAPPING.md`
+9. `docs/DEPLOYMENT_GUIDE.md`
+10. `active/HOME_PORTAL/`
 
 Yang tidak perlu dijadikan sumber kebenaran arsitektur:
 
@@ -77,8 +79,10 @@ Yang tidak perlu dijadikan sumber kebenaran arsitektur:
 
 | Dokumen | Isi |
 |---|---|
+| [MAINTENANCE_DIRECT_ACCESS.md](docs/MAINTENANCE_DIRECT_ACCESS.md) | Pintu masuk maintenance tercepat: task -> dokumen -> file -> fungsi |
 | [OPERATIONAL_WORKFLOW.md](docs/OPERATIONAL_WORKFLOW.md) | Jalur kerja operasional, runtime aktif, dan arti output deploy |
 | [GAS_ARCHITECTURE.md](docs/GAS_ARCHITECTURE.md) | Arsitektur sistem, struktur HOME_PORTAL, domain runtime, sheet dependency |
+| [INPUT_OUTPUT_DEPENDENCY_MAP.md](docs/INPUT_OUTPUT_DEPENDENCY_MAP.md) | Kontrak input-output, caller, dan dependency sheet per operation |
 | [NEURAL_MAPPING.md](docs/NEURAL_MAPPING.md) | Neural mapping, workflow flows, input/output dependency matrix, sheet dependency map |
 | [BLAST_RADIUS.md](docs/BLAST_RADIUS.md) | Analisis dampak per fungsi backend yang wajib dibaca sebelum edit kode |
 | [FUNCTION_MAPPING.md](docs/FUNCTION_MAPPING.md) | Index fungsi backend dan frontend dengan lokasi file |
@@ -105,3 +109,8 @@ Yang tidak perlu dijadikan sumber kebenaran arsitektur:
 ## Catatan Lokal
 
 Jika report, cache, atau dokumen lama terasa menyesatkan, regenerasi artifact audit dari script resmi lalu cocokkan lagi dengan `docs/` dan `active/HOME_PORTAL/`.
+
+Untuk maintenance harian, mulai dari:
+
+1. [docs/MAINTENANCE_DIRECT_ACCESS.md](docs/MAINTENANCE_DIRECT_ACCESS.md)
+2. [docs/INPUT_OUTPUT_DEPENDENCY_MAP.md](docs/INPUT_OUTPUT_DEPENDENCY_MAP.md)

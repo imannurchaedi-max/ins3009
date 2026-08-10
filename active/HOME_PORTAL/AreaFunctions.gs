@@ -547,8 +547,24 @@ function getDashboardData(basis, basisValue, deptFilter, typeFilter) {
  * @param {string} deptFilter  - '' = semua dept
  * @param {string} typeFilter  - '' | 'internal' | 'outsource'
  */
-function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter) {
+function getKehadiranDashboardCacheKey_(targetKey, shiftFilter, deptFilter, typeFilter, detailLimit, anomaliLimit) {
+  return [
+    'keh',
+    targetKey || '',
+    asText(shiftFilter).trim() || 'ALL_SHIFT',
+    asText(deptFilter).trim().toUpperCase() || 'ALL_DEPT',
+    asText(typeFilter).trim().toLowerCase() || 'ALL_TYPE',
+    detailLimit || 'ALL_DETAILS',
+    anomaliLimit || 'ALL_ANOMALI'
+  ].join('|');
+}
+
+function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter, options) {
   try {
+    const opts = options && typeof options === 'object' ? options : {};
+    const useCache = opts.useCache !== false;
+    const detailLimit = Math.max(0, Math.min(parseInt(opts.detailLimit, 10) || 0, 100));
+    const anomaliLimit = Math.max(0, Math.min(parseInt(opts.anomaliLimit, 10) || 0, 100));
     // ── Tentukan tanggal target ────────────────────────────
     const now    = nowWIB();
     let targetDate;
@@ -563,6 +579,14 @@ function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter) {
     const shiftF = asText(shiftFilter).trim();
     const deptF  = asText(deptFilter).trim().toUpperCase();
     const typeF  = asText(typeFilter).trim().toLowerCase();  // '' | 'internal' | 'outsource'
+    const cacheKey = getKehadiranDashboardCacheKey_(targetKey, shiftF, deptF, typeF, detailLimit, anomaliLimit);
+
+    if (useCache) {
+      const cached = CacheService.getScriptCache().get(cacheKey);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    }
 
     // ── Baca KARYAWAN (map by NIK) ────────────────────────
     const karyawanMap = getKaryawanMapByNIK();
@@ -759,7 +783,7 @@ function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter) {
       ? Math.round((totalHadir / totalExpected) * 100)
       : null;
 
-    return {
+    const result = {
       ok: true,
       tanggal: tanggalDisplay,
       summary: {
@@ -775,9 +799,15 @@ function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter) {
         coveragePct,
         byShift
       },
-      kehadiranList,
-      anomaliList
+      kehadiranList: detailLimit > 0 ? kehadiranList.slice(0, detailLimit) : kehadiranList,
+      anomaliList: anomaliLimit > 0 ? anomaliList.slice(0, anomaliLimit) : anomaliList,
+      totalKehadiranRows: kehadiranList.length,
+      totalAnomaliRows: anomaliList.length
     };
+    if (useCache) {
+      CacheService.getScriptCache().put(cacheKey, JSON.stringify(result), 45);
+    }
+    return result;
   } catch(e) {
     return { ok: false, msg: e.message };
   }

@@ -65,7 +65,7 @@ Catatan:
 ## URL Permanen HOME_PORTAL
 
 ```text
-https://script.google.com/macros/s/AKfycbw4I2Vxh_CKH2k1RHCtvqZwJ1fGwyb0LKeC4MPzEoVibhlSF0lSf5sYeuppZ3BBgp-x/exec
+https://script.google.com/macros/s/AKfycbzVN4Z58pluVPnUG1jBOBc4hLggJjDAlrSekiW9DtkHqvk8rEsSKuhvhWHTbsHbaP8m/exec
 ```
 
 ## Deployment IDs
@@ -76,7 +76,7 @@ Current map:
 
 ```json
 {
-  "HOME_PORTAL": "AKfycbw4I2Vxh_CKH2k1RHCtvqZwJ1fGwyb0LKeC4MPzEoVibhlSF0lSf5sYeuppZ3BBgp-x",
+  "HOME_PORTAL": "AKfycbzVN4Z58pluVPnUG1jBOBc4hLggJjDAlrSekiW9DtkHqvk8rEsSKuhvhWHTbsHbaP8m",
   "MODUL_GATE_PABRIK": "AKfycbyjQ36Nlastyw1xBgzvojgX6QH2oPxB6462YKg0sELBb3gb08dYQuKHz5X_RLFntfoV9g",
   "MODUL_AREA_KERJA": "AKfycbyu6uW7XgdZPtJysgtf3x0i3E7cxR5Hrb_dZNKYns0QJ6Lef7xzbC0mT3uP_rREHz5ypA",
   "MODUL_REPORT": "AKfycbycdcUt4y9RdoQIOTnIzWs6AxyZe5JayFhbk6f9abnv5kr3VAWapXicdVvRGn3o53BS"

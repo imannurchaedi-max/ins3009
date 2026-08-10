@@ -156,3 +156,162 @@ function openHomePortalLauncher() {
 
 // searchKaryawan tersedia di SharedLib.gs (implementasi yang benar & lengkap)
 // Dihapus dari sini karena: duplikat, memanggil getAllKaryawan() yang tidak ada → crash
+
+// ============================================================
+//  ENTRY POINT - Android App API (doPost)
+// ============================================================
+function getIsoWeekCodeForApi_(dateValue) {
+  const base = dateValue instanceof Date && !isNaN(dateValue.getTime())
+    ? new Date(Date.UTC(dateValue.getFullYear(), dateValue.getMonth(), dateValue.getDate()))
+    : new Date();
+  const day = base.getUTCDay() || 7;
+  base.setUTCDate(base.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(base.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((base - yearStart) / 86400000) + 1) / 7);
+  return base.getUTCFullYear() + '-W' + String(week).padStart(2, '0');
+}
+
+function resolveAndroidAbsenPeriod_(payload) {
+  const periodType = asText(payload && payload.periodType).trim().toLowerCase();
+  const periodValue = asText(payload && payload.periodValue).trim();
+  if (periodType && periodValue) {
+    return { periodType: periodType, periodValue: periodValue };
+  }
+
+  const startDate = parseIsoDate(payload && payload.startDate);
+  const endDate = parseIsoDate(payload && payload.endDate);
+  if (startDate && endDate) {
+    const sameDay = Utilities.formatDate(startDate, 'Asia/Jakarta', 'yyyyMMdd') === Utilities.formatDate(endDate, 'Asia/Jakarta', 'yyyyMMdd');
+    if (sameDay) {
+      return {
+        periodType: 'date',
+        periodValue: Utilities.formatDate(endDate, 'Asia/Jakarta', 'yyyy-MM-dd')
+      };
+    }
+
+    const sameMonth = Utilities.formatDate(startDate, 'Asia/Jakarta', 'yyyyMM') === Utilities.formatDate(endDate, 'Asia/Jakarta', 'yyyyMM');
+    if (sameMonth) {
+      return {
+        periodType: 'month',
+        periodValue: Utilities.formatDate(endDate, 'Asia/Jakarta', 'yyyy-MM')
+      };
+    }
+
+    const sameWeek = getIsoWeekCodeForApi_(startDate) === getIsoWeekCodeForApi_(endDate);
+    if (sameWeek) {
+      return {
+        periodType: 'week',
+        periodValue: getIsoWeekCodeForApi_(endDate)
+      };
+    }
+  }
+
+  const fallbackDate = endDate || startDate || nowWIB();
+  return {
+    periodType: 'week',
+    periodValue: getIsoWeekCodeForApi_(fallbackDate)
+  };
+}
+
+function doPost(e) {
+  const API_KEY = 'DAM_ANDROID_SECURE_KEY_2026'; // Harus sama dengan config di app Flutter
+
+  try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return responseJson({ ok: false, msg: 'Invalid request: No payload.' });
+    }
+
+    const payload = JSON.parse(e.postData.contents);
+    const apiKey = payload.apiKey;
+    
+    if (apiKey !== API_KEY) {
+      return responseJson({ ok: false, msg: 'Invalid API Key / Unauthorized.' });
+    }
+
+    const action = payload.action;
+    let result = { ok: false, msg: 'Unknown action' };
+
+    // API Router
+    switch(action) {
+      case 'verifyLogin':
+        result = verifyLogin(payload.nik, payload.password);
+        break;
+      case 'verifySession':
+        result = verifySession(payload.sessionToken || payload.nik);
+        break;
+      case 'getBindingStatus':
+        result = getBindingStatus(payload.noKartuMK);
+        break;
+      case 'bindKartu':
+        result = bindKartu(payload.noKartuMK, payload.nik, payload.loker, payload.lat, payload.lng);
+        break;
+      case 'releaseKartu':
+        result = releaseKartu(payload.noKartuMK, payload.loker, payload.lat, payload.lng);
+        break;
+      case 'scanAreaKerja':
+        result = scanAreaKerja(payload.noKartuMK, payload.tujuan, payload.catatan, payload.forceMode);
+        break;
+      case 'getDashboardData':
+        result = getDashboardData(payload.basis, payload.basisValue, payload.deptFilter, payload.typeFilter);
+        break;
+      case 'getKehadiranDashboard':
+        result = getKehadiranDashboard(
+          payload.tanggal,
+          payload.shiftFilter,
+          payload.deptFilter,
+          payload.typeFilter,
+          {
+            detailLimit: payload.detailLimit,
+            anomaliLimit: payload.anomaliLimit,
+            useCache: payload.useCache
+          }
+        );
+        break;
+      case 'getRecentAreaLogs':
+        result = getRecentAreaLogs(payload.limit);
+        break;
+      case 'getAreaActivityReport':
+        result = getAreaActivityReport(
+          payload.nik,
+          payload.deptFilter,
+          payload.periodType,
+          payload.periodValue,
+          payload.page,
+          payload.pageSize,
+          payload.recapPage,
+          payload.recapPageSize,
+          payload.search,
+          payload.sort
+        );
+        break;
+      case 'getAbsenReport':
+        var reportPeriod = resolveAndroidAbsenPeriod_(payload);
+        result = getAbsenReport(
+          payload.nik,
+          payload.deptFilter,
+          reportPeriod.periodType,
+          reportPeriod.periodValue,
+          payload.page,
+          payload.pageSize,
+          payload.search,
+          payload.sort
+        );
+        break;
+      case 'searchKaryawan':
+        result = searchKaryawan(payload.query);
+        break;
+      default:
+        result = { ok: false, msg: 'Action not mapped: ' + action };
+    }
+
+    return responseJson(result);
+
+  } catch (err) {
+    return responseJson({ ok: false, msg: 'Server error: ' + err.message });
+  }
+}
+
+function responseJson(data) {
+  return ContentService.createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+}

@@ -88,6 +88,11 @@ Aplikasi Android dibangun untuk memudahkan proses *tapping* kartu ID (NFC) oleh 
    - `flutter_nfc_kit`: Digunakan untuk membaca UID/Serial kartu MIFARE/RFID dari ID Karyawan saat melakukan *Scan Gate* maupun *Scan Area*.
    - `geolocator`: Digunakan secara khusus saat *Scan Gate Keluar* untuk memvalidasi posisi latitude/longitude karyawan.
 6. **Handling Redirect (302)**: Google Apps Script Web App `exec` URL selalu melakukan HTTP 302 Redirect. Komunikasi API di Dart *wajib* menggunakan `dart:io HttpClient` untuk memanualisasi handling redirect; `http.post` biasa akan mengubah metode POST menjadi GET sehingga payload JSON hilang di tengah jalan.
+7. **Transport Guard untuk Aksi Gate**:
+   - Aksi yang mengubah state (`bindKartu`, `releaseKartu`, `scanAreaKerja`) diperlakukan sebagai *non-idempotent* di client Android.
+   - Request seperti itu tidak boleh di-*auto retry* secara buta setelah koneksi putus, karena retry kedua bisa bertabrakan dengan `withCardLock()` walau user hanya satu orang.
+   - Jika koneksi terputus setelah submit, client harus melakukan *reconciliation* dengan membaca `getBindingStatus()` untuk memastikan apakah proses server sebenarnya sudah sukses.
+   - Pesan `Kartu sedang diproses` pada kondisi jaringan buruk harus dibaca sebagai potensi request pertama masih/baru saja selesai di server, bukan otomatis berarti ada user lain yang sedang memakai kartu itu.
 
 ## Workflow Operasional Satu Arah
 

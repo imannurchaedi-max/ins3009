@@ -808,6 +808,35 @@ Error "Sistem sedang memproses scan lain" muncul di jam sibuk (06:00–07:00 Shi
 
 ---
 
+## FASE 48: Gate Android Tidak Lagi Blind Retry Saat Koneksi Putus
+
+**Tanggal**: 2026-08-11
+
+**Kondisi awal**
+- User gate Android kadang melihat pesan `Kartu sedang diproses, coba scan ulang dalam beberapa detik.` walau pemakaian baru oleh satu orang.
+- Pada kasus lain muncul `Failed host lookup: 'script.google.com'` atau `HTTP Error: 404` berisi HTML Google, lalu status scan terasa gagal atau membingungkan.
+- Gejalanya paling sering terjadi saat sinyal seluler naik turun tepat setelah tombol `MASUK` atau `KELUAR` ditekan.
+
+**Akar masalah**
+- `ApiService.post()` masih memperlakukan aksi mutasi gate seperti request biasa, sehingga timeout/koneksi putus bisa memicu retry otomatis dari sisi Android.
+- Jika request pertama sebenarnya sudah sampai ke GAS dan sedang memegang `withCardLock()`, retry kedua dari device yang sama akan memantul sebagai `Kartu sedang diproses`.
+- Error transport dari GAS redirect chain belum diterjemahkan cukup ramah, sehingga DNS failure dan HTML 404 sementara tampil terlalu mentah di UI.
+
+**Perbaikan**
+- `ApiService` sekarang menandai `bindKartu`, `releaseKartu`, dan `scanAreaKerja` sebagai aksi *non-idempotent* yang tidak boleh di-*auto retry* secara buta.
+- Error jaringan seperti `failed host lookup`, timeout, koneksi putus di tengah jalan, dan HTML 404 sementara sekarang dipetakan ke pesan yang lebih operasional.
+- Setelah submit `MASUK` atau `KELUAR` gagal karena transport, `GateScreen` melakukan *reconciliation* singkat dengan `getBindingStatus()` untuk mengecek apakah server sebenarnya sudah menyimpan hasil proses pertama.
+- Jika status kartu sudah berubah sesuai hasil yang diharapkan, UI menampilkan pesan sukses pemulihan alih-alih memaksa user scan ulang.
+
+**Dampak**
+- False error `Kartu sedang diproses` turun signifikan pada kondisi sinyal tidak stabil, terutama untuk user tunggal.
+- User tidak lagi langsung dihukum retry kedua yang justru menabrak lock kartu miliknya sendiri.
+- Kegagalan jaringan sekarang lebih jelas dibedakan antara benar-benar belum masuk server vs sudah sukses di server tetapi balasan ke app sempat putus.
+
+**File**: `android_app/lib/services/api_service.dart` · `android_app/lib/screens/gate_screen.dart` · `docs/GAS_ARCHITECTURE.md`
+
+---
+
 ## FASE 47: Login Android Tidak Lagi Stuck di Loading Circle
 
 **Tanggal**: 2026-08-11

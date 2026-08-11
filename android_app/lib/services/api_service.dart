@@ -6,6 +6,14 @@ import '../config/api_config.dart';
 class ApiService {
   static const Duration _requestTimeout = Duration(seconds: 25);
   static const List<int> _retryDelaysMs = <int>[350, 900, 1800];
+  static const Set<String> _nonIdempotentActions = <String>{
+    'bindKartu',
+    'releaseKartu',
+    'scanAreaKerja',
+    'saveJadwalShift',
+    'deleteJadwalShift',
+    'bulkSaveJadwalShift',
+  };
 
   /// Sends a POST request to the Google Apps Script doPost endpoint.
   ///
@@ -15,6 +23,7 @@ class ApiService {
   static Future<Map<String, dynamic>> post(
       String action, Map<String, dynamic> payload) async {
     Map<String, dynamic>? lastFailure;
+    final allowAutomaticRetry = !_nonIdempotentActions.contains(action);
 
     for (int attempt = 0; attempt < _retryDelaysMs.length; attempt++) {
       try {
@@ -25,7 +34,8 @@ class ApiService {
         }
 
         lastFailure = result;
-        if (!_shouldRetryResult(result) ||
+        if (!allowAutomaticRetry ||
+            !_shouldRetryResult(result) ||
             attempt == _retryDelaysMs.length - 1) {
           return _massageFailure(result);
         }
@@ -33,35 +43,46 @@ class ApiService {
         lastFailure = {
           'ok': false,
           'msg':
-              'Koneksi ke server timeout setelah ${_requestTimeout.inSeconds} detik.'
+              'Koneksi ke server timeout setelah ${_requestTimeout.inSeconds} detik.',
+          'failureKind': 'timeout',
         };
-        if (attempt == _retryDelaysMs.length - 1) {
+        if (!allowAutomaticRetry || attempt == _retryDelaysMs.length - 1) {
           return _massageFailure(lastFailure);
         }
       } on SocketException catch (e) {
         lastFailure = {
           'ok': false,
-          'msg': 'Koneksi jaringan terputus: ${e.message}'
+          'msg': 'Koneksi jaringan terputus: ${e.message}',
+          'failureKind': _detectSocketFailureKind(e.message),
         };
-        if (attempt == _retryDelaysMs.length - 1) {
+        if (!allowAutomaticRetry || attempt == _retryDelaysMs.length - 1) {
           return _massageFailure(lastFailure);
         }
       } on HandshakeException catch (_) {
         lastFailure = {
           'ok': false,
-          'msg': 'Handshake HTTPS gagal. Koneksi internet sedang tidak stabil.'
+          'msg': 'Handshake HTTPS gagal. Koneksi internet sedang tidak stabil.',
+          'failureKind': 'handshake',
         };
-        if (attempt == _retryDelaysMs.length - 1) {
+        if (!allowAutomaticRetry || attempt == _retryDelaysMs.length - 1) {
           return _massageFailure(lastFailure);
         }
       } on HttpException catch (e) {
-        lastFailure = {'ok': false, 'msg': 'HTTP Exception: ${e.message}'};
-        if (attempt == _retryDelaysMs.length - 1) {
+        lastFailure = {
+          'ok': false,
+          'msg': 'HTTP Exception: ${e.message}',
+          'failureKind': 'http',
+        };
+        if (!allowAutomaticRetry || attempt == _retryDelaysMs.length - 1) {
           return _massageFailure(lastFailure);
         }
       } catch (e) {
-        lastFailure = {'ok': false, 'msg': 'Network Exception: $e'};
-        if (attempt == _retryDelaysMs.length - 1) {
+        lastFailure = {
+          'ok': false,
+          'msg': 'Network Exception: $e',
+          'failureKind': 'network',
+        };
+        if (!allowAutomaticRetry || attempt == _retryDelaysMs.length - 1) {
           return _massageFailure(lastFailure);
         }
       }
@@ -152,6 +173,7 @@ class ApiService {
   static bool _shouldRetryResult(Map<String, dynamic> result) {
     final message = (result['msg'] ?? '').toString().toLowerCase();
     return message.contains('timeout') ||
+        message.contains('failed host lookup') ||
         message.contains('software caused connection abort') ||
         message.contains('connection abort') ||
         message.contains('connection reset') ||
@@ -165,6 +187,17 @@ class ApiService {
         message.contains('http error: 504');
   }
 
+  static String _detectSocketFailureKind(String message) {
+    final lower = message.toLowerCase();
+    if (lower.contains('failed host lookup')) return 'dns';
+    if (lower.contains('connection reset') ||
+        lower.contains('connection abort') ||
+        lower.contains('connection closed')) {
+      return 'connection';
+    }
+    return 'network';
+  }
+
   static Map<String, dynamic> _massageFailure(Map<String, dynamic>? result) {
     final message = (result?['msg'] ?? 'Koneksi ke server gagal.')
         .toString()
@@ -172,11 +205,21 @@ class ApiService {
         .trim();
     final lower = message.toLowerCase();
 
+    if (lower.contains('failed host lookup')) {
+      return {
+        'ok': false,
+        'failureKind': 'dns',
+        'msg':
+            'DNS jaringan gagal menjangkau server Google Apps Script. Coba pindah sinyal atau ulangi beberapa detik lagi.',
+      };
+    }
+
     if (lower.contains('software caused connection abort') ||
         lower.contains('connection abort') ||
         lower.contains('connection reset')) {
       return {
         'ok': false,
+        'failureKind': 'connection',
         'msg':
             'Koneksi ke server terputus di tengah jalan. Coba lagi beberapa detik lagi.'
       };
@@ -185,6 +228,7 @@ class ApiService {
     if (lower.contains('handshake')) {
       return {
         'ok': false,
+        'failureKind': 'handshake',
         'msg':
             'Koneksi HTTPS gagal. Pastikan sinyal internet stabil lalu coba lagi.'
       };
@@ -193,13 +237,45 @@ class ApiService {
     if (lower.contains('timeout')) {
       return {
         'ok': false,
+        'failureKind': 'timeout',
         'msg': 'Server terlalu lama merespons. Coba ulangi beberapa saat lagi.'
+      };
+    }
+
+    if (lower.contains('http error: 404') && lower.contains('<!doctype html')) {
+      return {
+        'ok': false,
+        'failureKind': 'http',
+        'msg':
+            'Server Google Apps Script mengembalikan halaman error sementara. Coba ulangi beberapa detik lagi.',
       };
     }
 
     return {
       'ok': false,
+      'failureKind': result?['failureKind'] ?? 'unknown',
       'msg': message,
     };
+  }
+
+  static bool isConnectivityFailureResult(Map<String, dynamic>? result) {
+    if (result == null) return false;
+    final kind = (result['failureKind'] ?? '').toString().toLowerCase();
+    if (kind == 'dns' ||
+        kind == 'network' ||
+        kind == 'connection' ||
+        kind == 'timeout' ||
+        kind == 'handshake') {
+      return true;
+    }
+
+    final message = (result['msg'] ?? '').toString().toLowerCase();
+    return message.contains('timeout') ||
+        message.contains('failed host lookup') ||
+        message.contains('handshake') ||
+        message.contains('koneksi jaringan terputus') ||
+        message.contains('koneksi ke server terputus') ||
+        message.contains('server terlalu lama merespons') ||
+        message.contains('http exception');
   }
 }

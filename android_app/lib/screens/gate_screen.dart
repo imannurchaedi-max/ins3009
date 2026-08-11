@@ -103,8 +103,8 @@ class _GateScreenState extends State<GateScreen> {
     setState(() {
       _isLookingUpTarget = false;
       if (result['ok'] == true && result['karyawan'] is Map) {
-        _targetEmployee =
-            Map<String, dynamic>.from(result['karyawan'] as Map<dynamic, dynamic>);
+        _targetEmployee = Map<String, dynamic>.from(
+            result['karyawan'] as Map<dynamic, dynamic>);
         if (announce) {
           _statusMessage =
               'Target karyawan ditemukan: ${_targetEmployee!['nama'] ?? targetNik}';
@@ -184,9 +184,7 @@ class _GateScreenState extends State<GateScreen> {
       _statusColor = Colors.blue;
     });
 
-    final result = await ApiService.post('getBindingStatus', {
-      'noKartuMK': cardCode,
-    });
+    final result = await _fetchCardStatus(cardCode);
 
     if (!mounted) return;
 
@@ -215,6 +213,34 @@ class _GateScreenState extends State<GateScreen> {
         _statusColor = Colors.red;
       }
     });
+  }
+
+  Future<Map<String, dynamic>> _fetchCardStatus(String cardCode) {
+    return ApiService.post('getBindingStatus', {
+      'noKartuMK': cardCode,
+    });
+  }
+
+  Future<bool> _reconcileMasukAfterTransportFailure(
+    String cardCode,
+    String targetNik,
+  ) async {
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    final check = await _fetchCardStatus(cardCode);
+    if (check['ok'] != true) return false;
+
+    final status = (check['status'] ?? '').toString().toUpperCase();
+    final boundNik = (check['nik'] ?? '').toString().trim();
+    return status == 'BOUND' && boundNik == targetNik.trim();
+  }
+
+  Future<bool> _reconcileKeluarAfterTransportFailure(String cardCode) async {
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    final check = await _fetchCardStatus(cardCode);
+    if (check['ok'] != true) return false;
+
+    final status = (check['status'] ?? '').toString().toUpperCase();
+    return status == 'FREE';
   }
 
   Future<void> _scanCardWithCamera() async {
@@ -341,6 +367,25 @@ class _GateScreenState extends State<GateScreen> {
           _statusColor = Colors.red;
         }
       });
+
+      if (result['ok'] != true &&
+          ApiService.isConnectivityFailureResult(result)) {
+        final recovered = await _reconcileMasukAfterTransportFailure(
+            uid.toString(), targetNik);
+        if (!mounted || !recovered) return;
+
+        setState(() {
+          _statusMessage =
+              'Koneksi sempat terputus, tetapi proses masuk sudah tercatat di server.';
+          _statusColor = Colors.green;
+          _scannedData = null;
+          _lokerController.clear();
+          if (isAssistRole) {
+            _targetNikController.clear();
+            _targetEmployee = null;
+          }
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -387,6 +432,21 @@ class _GateScreenState extends State<GateScreen> {
           _statusColor = Colors.red;
         }
       });
+
+      if (result['ok'] != true &&
+          ApiService.isConnectivityFailureResult(result)) {
+        final recovered =
+            await _reconcileKeluarAfterTransportFailure(uid.toString());
+        if (!mounted || !recovered) return;
+
+        setState(() {
+          _statusMessage =
+              'Koneksi sempat terputus, tetapi proses keluar sudah tercatat di server.';
+          _statusColor = Colors.green;
+          _scannedData = null;
+          _lokerController.clear();
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -580,7 +640,8 @@ class _GateScreenState extends State<GateScreen> {
                             .toString()
                             .trim()
                             .isNotEmpty)
-                      Text('Terakhir release: ${_scannedData!['waktuRelease']}'),
+                      Text(
+                          'Terakhir release: ${_scannedData!['waktuRelease']}'),
                   ],
                 ),
               ),

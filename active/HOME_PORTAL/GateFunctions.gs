@@ -88,9 +88,11 @@ function updateRecapAbsen(tanggal, nik, nama, dept, jabatan, jamMasuk, jamKeluar
         if (jamMasuk  && colJamMasuk  > 0) sheet.getRange(foundRow, colJamMasuk).setValue(jamMasuk);
         if (jamKeluar && colJamKeluar > 0) sheet.getRange(foundRow, colJamKeluar).setValue(jamKeluar);
         if (colStatus   > 0) sheet.getRange(foundRow, colStatus).setValue(updatedStatus);
-        if (noKartuMK && colNoKartu  > 0) sheet.getRange(foundRow, colNoKartu).setValue(noKartuMK);
+        if (noKartuMK && colNoKartu  > 0) {
+          sheet.getRange(foundRow, colNoKartu).setNumberFormat('@');
+          sheet.getRange(foundRow, colNoKartu).setValue(asText(noKartuMK));
+        }
         if (noLoker   && colNoLoker  > 0) sheet.getRange(foundRow, colNoLoker).setValue(noLoker);
-        if (noKartuMK && colNoKartu  > 0) sheet.getRange(foundRow, colNoKartu).setNumberFormat('@');
       } else {
         const status = getRecapStatus(jamMasuk, jamKeluar);
         const newRow = [
@@ -111,7 +113,10 @@ function updateRecapAbsen(tanggal, nik, nama, dept, jabatan, jamMasuk, jamKeluar
         sheet.getRange(newRowIdx, 1).setNumberFormat('@');  // TANGGAL = plain text
         if (colJamMasuk  > 0) sheet.getRange(newRowIdx, colJamMasuk).setNumberFormat('@');
         if (colJamKeluar > 0) sheet.getRange(newRowIdx, colJamKeluar).setNumberFormat('@');
-        if (colNoKartu   > 0) sheet.getRange(newRowIdx, colNoKartu).setNumberFormat('@');
+        if (colNoKartu   > 0) {
+          sheet.getRange(newRowIdx, colNoKartu).setNumberFormat('@');
+          sheet.getRange(newRowIdx, colNoKartu).setValue(asText(noKartuMK || ''));
+        }
       }
       
       try { CacheService.getScriptCache().removeAll(['absen:*']); } catch(e) {}
@@ -659,11 +664,13 @@ function bindKartu(noKartuMK, nik, loker, userLat, userLng) {
       var waktu2        = formatDateTime(now2);         // 'dd/MM/yyyy HH:mm:ss' plain text
       sheetB.appendRow([no2, kar2.nik, kar2.nama, kar2.dept, kar2.jabatan, waktu2, 'BOUND']);
       applyNumberFormatToCell_(sheetB, sheetB.getLastRow(), 1, '@');  // NO KARTU MK = plain text
+      sheetB.getRange(sheetB.getLastRow(), 1).setValue(asText(no2));
       applyNumberFormatToCell_(sheetB, sheetB.getLastRow(), 6, '@');  // plain text
 
       var sheetMasuk = getSheet(SHEET_MASUK_PABRIK);
       sheetMasuk.appendRow([no2, kar2.nik, kar2.nama, tanggal2Str, jam2, shiftLabel2, loker || '']);
       applyNumberFormatToCell_(sheetMasuk, sheetMasuk.getLastRow(), 1, '@');  // NO KARTU MK = plain text
+      sheetMasuk.getRange(sheetMasuk.getLastRow(), 1).setValue(asText(no2));
       applyNumberFormatToCell_(sheetMasuk, sheetMasuk.getLastRow(), 4, '@');  // plain text
 
       // Simpan data untuk recap update di luar lock
@@ -775,6 +782,7 @@ function releaseKartu(noKartuMK, loker, userLat, userLng) {
       var tanggalStr = formatDateISO(now);  // ISO 'yyyy-MM-dd' for storage
       sheetKeluar.appendRow([no, binding2.nik, binding2.nama, tanggalStr, jam, detectShift(now, 'keluar'), loker || '']);
       applyNumberFormatToCell_(sheetKeluar, sheetKeluar.getLastRow(), 1, '@');  // NO KARTU MK = plain text
+      sheetKeluar.getRange(sheetKeluar.getLastRow(), 1).setValue(asText(no));
       applyNumberFormatToCell_(sheetKeluar, sheetKeluar.getLastRow(), 4, '@');  // plain text
 
       // Simpan data untuk recap update di luar lock

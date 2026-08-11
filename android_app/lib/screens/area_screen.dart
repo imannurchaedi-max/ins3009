@@ -100,7 +100,7 @@ class _AreaScreenState extends State<AreaScreen> {
     if (cardCode == null) {
       setState(() {
         _statusMessage =
-            'Scan berhasil dibaca, tetapi format barcode/QR tidak dikenali sebagai kartu MK.';
+            'Scan terbaca, tetapi kodenya ambigu atau bukan format kartu MK. Tahan kamera sedikit lebih lama lalu scan ulang.';
         _statusColor = Colors.red;
       });
       return;

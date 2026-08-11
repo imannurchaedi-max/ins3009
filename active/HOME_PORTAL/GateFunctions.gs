@@ -90,6 +90,7 @@ function updateRecapAbsen(tanggal, nik, nama, dept, jabatan, jamMasuk, jamKeluar
         if (colStatus   > 0) sheet.getRange(foundRow, colStatus).setValue(updatedStatus);
         if (noKartuMK && colNoKartu  > 0) sheet.getRange(foundRow, colNoKartu).setValue(noKartuMK);
         if (noLoker   && colNoLoker  > 0) sheet.getRange(foundRow, colNoLoker).setValue(noLoker);
+        if (noKartuMK && colNoKartu  > 0) sheet.getRange(foundRow, colNoKartu).setNumberFormat('@');
       } else {
         const status = getRecapStatus(jamMasuk, jamKeluar);
         const newRow = [
@@ -110,6 +111,7 @@ function updateRecapAbsen(tanggal, nik, nama, dept, jabatan, jamMasuk, jamKeluar
         sheet.getRange(newRowIdx, 1).setNumberFormat('@');  // TANGGAL = plain text
         if (colJamMasuk  > 0) sheet.getRange(newRowIdx, colJamMasuk).setNumberFormat('@');
         if (colJamKeluar > 0) sheet.getRange(newRowIdx, colJamKeluar).setNumberFormat('@');
+        if (colNoKartu   > 0) sheet.getRange(newRowIdx, colNoKartu).setNumberFormat('@');
       }
       
       try { CacheService.getScriptCache().removeAll(['absen:*']); } catch(e) {}
@@ -202,6 +204,41 @@ function findOpenBindingSnapshotByNik_(nik, data) {
   return null;
 }
 
+function getComparableCardKeys_(value) {
+  const normalized = normalizeCard(value);
+  const keys = [];
+  if (!normalized) return keys;
+
+  function addKey(key) {
+    const text = asText(key).trim().toUpperCase();
+    if (text && keys.indexOf(text) === -1) keys.push(text);
+  }
+
+  addKey(normalized);
+
+  const mkMatch = normalized.match(/^MK(\d{1,6})$/);
+  if (mkMatch) {
+    addKey('NUM|' + String(parseInt(mkMatch[1], 10) || 0));
+    return keys;
+  }
+
+  if (/^\d{1,6}$/.test(normalized)) {
+    addKey('NUM|' + String(parseInt(normalized, 10) || 0));
+  }
+
+  return keys;
+}
+
+function cardsMatchForBinding_(left, right) {
+  const leftKeys = getComparableCardKeys_(left);
+  const rightKeys = getComparableCardKeys_(right);
+  if (!leftKeys.length || !rightKeys.length) return false;
+
+  return leftKeys.some(function(key) {
+    return rightKeys.indexOf(key) !== -1;
+  });
+}
+
 function getBindingStatus(noKartuMK) {
   try {
     const sheet = getSheet(SHEET_BINDING);
@@ -210,8 +247,12 @@ function getBindingStatus(noKartuMK) {
     let latestReleased = null;
 
     for (let i = data.length - 1; i >= 1; i--) {
-      if (normalizeCard(data[i][0]) === no) {
+      if (cardsMatchForBinding_(data[i][0], no)) {
         const snapshot = buildBindingSnapshotFromRow_(data[i], i + 1);
+        snapshot.storedNoKartuMK = normalizeCard(data[i][0]);
+        if (cardsMatchForBinding_(snapshot.noKartuMK, no)) {
+          snapshot.noKartuMK = no;
+        }
         if (snapshot.status === 'BOUND') return snapshot;
         if (!latestReleased) latestReleased = snapshot;
       }
@@ -617,10 +658,12 @@ function bindKartu(noKartuMK, nik, loker, userLat, userLng) {
       var tanggal2Str   = formatDateISO(now2);        // ISO 'yyyy-MM-dd' for storage
       var waktu2        = formatDateTime(now2);         // 'dd/MM/yyyy HH:mm:ss' plain text
       sheetB.appendRow([no2, kar2.nik, kar2.nama, kar2.dept, kar2.jabatan, waktu2, 'BOUND']);
+      applyNumberFormatToCell_(sheetB, sheetB.getLastRow(), 1, '@');  // NO KARTU MK = plain text
       applyNumberFormatToCell_(sheetB, sheetB.getLastRow(), 6, '@');  // plain text
 
       var sheetMasuk = getSheet(SHEET_MASUK_PABRIK);
       sheetMasuk.appendRow([no2, kar2.nik, kar2.nama, tanggal2Str, jam2, shiftLabel2, loker || '']);
+      applyNumberFormatToCell_(sheetMasuk, sheetMasuk.getLastRow(), 1, '@');  // NO KARTU MK = plain text
       applyNumberFormatToCell_(sheetMasuk, sheetMasuk.getLastRow(), 4, '@');  // plain text
 
       // Simpan data untuk recap update di luar lock
@@ -731,6 +774,7 @@ function releaseKartu(noKartuMK, loker, userLat, userLng) {
       var sheetKeluar = getSheet(SHEET_KELUAR_PABRIK);
       var tanggalStr = formatDateISO(now);  // ISO 'yyyy-MM-dd' for storage
       sheetKeluar.appendRow([no, binding2.nik, binding2.nama, tanggalStr, jam, detectShift(now, 'keluar'), loker || '']);
+      applyNumberFormatToCell_(sheetKeluar, sheetKeluar.getLastRow(), 1, '@');  // NO KARTU MK = plain text
       applyNumberFormatToCell_(sheetKeluar, sheetKeluar.getLastRow(), 4, '@');  // plain text
 
       // Simpan data untuk recap update di luar lock

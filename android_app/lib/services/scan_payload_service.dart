@@ -111,6 +111,12 @@ class ScanPayloadService {
   static String _digitsOnly(String value) =>
       value.replaceAll(RegExp(r'[^0-9]'), '');
 
+  static bool _isKnownDigitCardToken(String digitsOnly) {
+    if (digitsOnly.length >= 3 && digitsOnly.length <= 5) return true;
+    if (digitsOnly.length == 6 && digitsOnly.startsWith('1')) return true;
+    return false;
+  }
+
   static String _normalizeCardToken(String value) => value
       .trim()
       .toUpperCase()
@@ -202,6 +208,9 @@ class ScanPayloadService {
 
     final digitsOnly = _digitsOnly(normalized);
     if (digitsOnly == normalized) {
+      if (!_isKnownDigitCardToken(digitsOnly)) {
+        return <String>[];
+      }
       if (digitsOnly.length >= 3 && digitsOnly.length <= 5) {
         add('MK${digitsOnly.padLeft(5, '0')}');
       }

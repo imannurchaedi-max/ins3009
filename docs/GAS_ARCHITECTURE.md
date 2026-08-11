@@ -37,8 +37,9 @@ Yang tidak boleh dipakai sebagai sumber arsitektur aktif:
 ## Graphify Knowledge Graph
 
 Proyek ini telah dianalisis menggunakan **Graphify**, yang menghasilkan representasi grafik dari seluruh basis kode, dependensi, dan *workflow*:
-- Direktori `graphify-out/` berisi grafik utuh (`graph.json`) dan representasi visual HTML (`graph.html`).
-- Rangkuman hubungan dan *cluster* komunitas dapat dibaca di `graphify-out/GRAPH_REPORT.md`.
+- Direktori `graphify-out/` adalah output lokal hasil generate ulang saat analisis Graphify sedang dibutuhkan.
+- Artifact Graphify tidak lagi dijadikan file permanen di repo aktif supaya hasil graph tidak membawa noise dari snapshot lama atau arsip legacy.
+- Jika perlu, generate ulang dengan `venv\Scripts\python.exe -m graphify scan . --output graphify-out`.
 - Rincian dependensi otomatis untuk pemanggilan fungsi tingkat rendah, rantai UI, dan ikatan data konseptual didokumentasikan di `docs/NEURAL_MAPPING.md`.
 
 ## Struktur HOME_PORTAL
@@ -75,6 +76,7 @@ Aplikasi Android dibangun untuk memudahkan proses *tapping* kartu ID (NFC) oleh 
 
 1. **Stack**: Frontend menggunakan Flutter (Dart), Backend menggunakan GAS (`Code.js` -> `doPost`).
 2. **HTTP Router**: `doPost(e)` di `Code.js` menerima payload JSON yang di-*flatten* (terdiri dari `apiKey`, `action`, dan parameter lain). Jika `apiKey` cocok, request akan di-route ke fungsi backend yang sama persis seperti yang digunakan Web App.
+   - Mapping action Android ke handler GAS, caller Flutter, dan sheet dependency dirangkum di `docs/ANDROID_GAS_BRIDGE_MAP.md`.
 3. **Session Shell**:
    - `SessionProvider` adalah source of truth auth state Android.
    - `AuthWrapper` memutuskan hanya dua state root: `LoginScreen` atau `HomeScreen`.

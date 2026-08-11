@@ -22,6 +22,8 @@ Dokumen ini merangkum kontrak input, output, dependency sheet, dan caller untuk 
 
 | Operation | Caller | Input | Output | Read Sheet | Write Sheet | Dependency Penting |
 |---|---|---|---|---|---|---|
+| `submitGateRequest(payload)` | Android `gate_screen.dart` | `requestId`, `action`, payload gate (`bindKartu` / `releaseKartu`) | `ok`, `status`, `requestId`, optional hasil mutasi | `ANDROID_GATE_REQUESTS`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK`, `KARYAWAN` | `ANDROID_GATE_REQUESTS`, lalu domain gate terkait | pintu masuk idempotent untuk mutasi gate Android; request lama tidak boleh dibuat ulang dengan ID baru saat koneksi putus |
+| `getGateRequestStatus(requestId)` | Android polling recovery | `requestId` | `ok`, `status`, `response`, `lastError` | `ANDROID_GATE_REQUESTS` | - | dipakai setelah submit sukses tapi response utama hilang atau timeout |
 | `getBindingStatus(noKartuMK)` | web gate, Android gate | `noKartuMK` | `ok`, `status`, `nik`, `nama`, `dept`, `jabatan` | `BINDING_KARTU_MK`, `KARYAWAN` | - | card harus lolos `assertCard()` / `normalizeCard()` |
 | `bindKartu(noKartuMK, nik, loker, lat, lng)` | web `confirmMasuk()`, Android gate | serial kartu, `nik`, `loker`, opsional geo | `ok`, `msg`, binding context | `KARYAWAN`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | `REGISTRASI SAAT MASUK PABRIK`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | memakai `withCardLock()` dan `safeUpdateRecapAbsen()` |
 | `releaseKartu(noKartuMK, loker, lat, lng)` | web `confirmKeluar()`, Android gate | serial kartu, `loker`, opsional geo | `ok`, `msg`, release context | `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | `REGISTRASI SAAT KELUAR PABRIK`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | status kartu harus `BOUND`; keluar bergantung binding aktif |
@@ -39,6 +41,13 @@ Dokumen ini merangkum kontrak input, output, dependency sheet, dan caller untuk 
 |---|---|---|---|---|---|---|
 | `getDashboardData(basis, basisValue, deptFilter, typeFilter)` | web dashboard area | basis waktu, filter dept/type | `ok`, summary area, `boundList`, `areaPopulation`, `deptPopulation`, `kanbanGroups`, `shiftCoverage` | `ABSEN IN OUT MK`, `REGISTRASI MASUK KELUAR AREA KERJA`, `KARYAWAN` | - | area dashboard menghitung orang `DI DALAM` lalu overlay log area |
 | `getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter, options)` | web kehadiran, Android dashboard | tanggal, filter, `detailLimit`, `anomaliLimit`, `useCache` | `ok`, `summary`, `kehadiranList`, `anomaliList`, total rows | `ABSEN IN OUT MK`, `KARYAWAN`, `JADWAL_SHIFT` | cache script | memakai `CacheService`; shift bisa berasal dari jadwal atau deteksi jam |
+
+## Android Transport & Diagnostics
+
+| Operation | Caller | Input | Output | Read Sheet | Write Sheet | Dependency Penting |
+|---|---|---|---|---|---|---|
+| `pingAndroidGateway(payload)` | `ApiService.prewarmGateway()`, `home_screen.dart` | metadata ringan: platform, session, warmup context | `ok`, `serverTime`, `message` | - | - | dipakai untuk prewarm DNS, redirect, dan TLS handshake sebelum scan pertama |
+| `logAndroidDiagnostics(payload)` | `ApiService` flush telemetry | `events[]` batch diagnostik | `ok`, `accepted`, `rejected` | - | `ANDROID_DIAGNOSTICS` | event sukses/gagal koneksi Android di-buffer lokal lalu di-flush setelah request berikutnya berhasil |
 
 ## Report
 
@@ -76,6 +85,10 @@ Dokumen ini merangkum kontrak input, output, dependency sheet, dan caller untuk 
 - `verifyLogin`
 - `verifySession`
 - `getBindingStatus`
+- `submitGateRequest`
+- `getGateRequestStatus`
+- `pingAndroidGateway`
+- `logAndroidDiagnostics`
 - `bindKartu`
 - `releaseKartu`
 - `scanAreaKerja`
@@ -97,6 +110,8 @@ Dokumen ini merangkum kontrak input, output, dependency sheet, dan caller untuk 
 | `BINDING_KARTU_MK` | state kartu aktif | `getBindingStatus()`, `bindKartu()`, `releaseKartu()`, `scanAreaKerja()` |
 | `ABSEN IN OUT MK` | recap turunan | gate, dashboard kehadiran, report absen |
 | `JADWAL_SHIFT` | planning shift | dashboard kehadiran, jadwal CRUD |
+| `ANDROID_GATE_REQUESTS` | ledger request gate Android | `submitGateRequest()`, `getGateRequestStatus()` |
+| `ANDROID_DIAGNOSTICS` | audit koneksi Android | `logAndroidDiagnostics()` |
 
 ## Quick Troubleshooting by Symptom
 

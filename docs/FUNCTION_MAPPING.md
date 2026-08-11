@@ -31,17 +31,22 @@ Daftar lengkap semua fungsi backend (GAS) dan frontend di project EMPLOYEE TRACK
 |---|---|---|
 | `scanAreaKerja(serial, area, reason, forceMode)` | 9 | Scan IN/OUT area kerja |
 | `getDashboardData(basis, basisValue, deptFilter, typeFilter)` | 68 | Dashboard operasional: populasi area, kanban, shift coverage |
-| `toDateKey(date)` | 70 | Konversi Date ke string YYYYMMDD |
-| `parseTimeParts(serial)` | 74 | Parse kartu serial ke time parts |
-| `toDisplayTime(parts)` | 92 | Format time parts ke HH:MM |
-| `buildDateTimeKey(date, timeStr)` | 101 | Gabung date+time jadi key sortir |
-| `isDateWithinRange(d, start, end)` | 110 | Cek apakah date dalam range |
-| `getCurrentShiftLabel()` | 114 | Deteksi shift saat ini berdasarkan jam WIB |
-| `getIsoWeekCode(date)` | 118 | Generate kode ISO week (YYYY-Www) |
-| `isTimeInShift(d, shift)` | 127 | Cek apakah jam masuk sesuai shift |
-| `buildBasisConfig(basis, basisValue)` | 136 | Build konfigurasi basis waktu dashboard |
+| `parseTimeParts(value)` | inline | Helper internal parser waktu untuk dashboard |
+| `toDisplayTime(value)` | inline | Helper internal formatter jam dashboard |
+| `buildDateTimeKey(date, timeStr)` | inline | Helper internal key sortir dashboard |
+| `isDateWithinRange(d, start, end)` | inline | Helper internal range filter dashboard |
+| `getCurrentShiftLabel()` | inline | Helper internal label shift aktif |
+| `getIsoWeekCode(date)` | inline | Helper internal kode ISO week |
+| `isTimeInShift(d, shift)` | inline | Helper internal filter shift dashboard |
+| `buildBasisConfig(basis, basisValue)` | inline | Helper internal konfigurasi basis waktu |
 | `getRecentAreaLogs()` | 461 | Ambil 20 log area terbaru |
 | `getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter)` | ~FASE35 | Dashboard kehadiran/keterlambatan/lembur |
+
+### AndroidDiagnostics.gs — Android Gateway Warmup & Telemetry
+| Function | Line | Description |
+|---|---|---|
+| `pingAndroidGateway(payload)` | 53 | Warmup jalur Android ke GAS tanpa mutasi |
+| `logAndroidDiagnostics(payload)` | 65 | Simpan batch diagnostik Android ke sheet audit |
 
 ### ReportFunctions.gs — Report & Export
 | Function | Line | Description |
@@ -354,7 +359,7 @@ Daftar lengkap semua fungsi backend (GAS) dan frontend di project EMPLOYEE TRACK
 
 ---
 
-## Graphify Communities (Knowledge Graph)
+## Graphify Communities (Historical / Local Regeneration)
 
 | Community | Coverage | Key Nodes |
 |---|---|---|
@@ -381,5 +386,5 @@ Daftar lengkap semua fungsi backend (GAS) dan frontend di project EMPLOYEE TRACK
 
 ---
 
-**Last updated**: 2026-06-23  
-**Data source**: `reports/function_inventory.md`, `docs/NEURAL_MAPPING.md`, Graphify `graph.json`
+**Last updated**: 2026-08-11  
+**Data source**: `reports/function_inventory.md`, `docs/NEURAL_MAPPING.md`, hasil GitNexus, dan Graphify lokal bila diregenerate

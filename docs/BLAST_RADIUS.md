@@ -178,6 +178,42 @@ Dokumen ini memetakan dampak perubahan setiap fungsi backend GAS. Digunakan seba
 
 ---
 
+## Domain: Android Bridge & Diagnostics
+
+### submitGateRequest(payload) — `GateFunctions.gs:424`
+- **Risk**: HIGH
+- **Frontend callers**: `gate_screen.dart` (Android)
+- **Callees**: `withCardLock()`, `bindKartu()`, `releaseKartu()`, helper ledger Android gate
+- **Sheets read**: `ANDROID_GATE_REQUESTS`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK`, `KARYAWAN`
+- **Sheets write**: `ANDROID_GATE_REQUESTS`, plus sheet gate domain terkait
+- **What breaks**: Retry Android jadi tidak idempotent. Scan gate dari HP rawan double write atau status abu-abu saat koneksi putus.
+- **Notes**: Ini lapisan bridge Android, bukan pengganti mutasi inti `bindKartu()` / `releaseKartu()`.
+
+### getGateRequestStatus(requestId) — `GateFunctions.gs:485`
+- **Risk**: MEDIUM
+- **Frontend callers**: polling recovery di `gate_screen.dart`
+- **Callees**: `getSheet()`, helper lookup ledger
+- **Sheets read**: `ANDROID_GATE_REQUESTS`
+- **What breaks**: Android tidak bisa memastikan apakah request gate sebelumnya sudah sukses atau belum.
+- **Notes**: Sangat penting untuk recovery setelah timeout atau response hilang.
+
+### pingAndroidGateway(payload) — `AndroidDiagnostics.gs:53`
+- **Risk**: LOW
+- **Frontend callers**: `home_screen.dart` via `ApiService.prewarmGateway()`
+- **Sheets read/write**: -
+- **What breaks**: Tidak mematikan flow inti, tetapi scan pertama dari HP lebih rawan kena cold-start DNS/TLS/redirect penalty.
+- **Notes**: Dipakai untuk prewarm koneksi.
+
+### logAndroidDiagnostics(payload) — `AndroidDiagnostics.gs:65`
+- **Risk**: LOW
+- **Frontend callers**: `ApiService` flush telemetry Android
+- **Callees**: `getSheet()`
+- **Sheets write**: `ANDROID_DIAGNOSTICS`
+- **What breaks**: Kegagalan koneksi Android tidak punya jejak audit backend. Proses troubleshooting jadi buta.
+- **Notes**: Tidak boleh melempar error yang merusak request operasional lain.
+
+---
+
 ## Domain: Report
 
 ### getAbsenReport(nik, deptFilter, periodType, periodValue) — `ReportFunctions.gs:26`
@@ -362,5 +398,5 @@ Dokumen ini memetakan dampak perubahan setiap fungsi backend GAS. Digunakan seba
 
 ---
 
-**Last updated**: 2026-06-23  
-**Data source**: `reports/function_inventory.md`, `docs/NEURAL_MAPPING.md`, `docs/GAS_ARCHITECTURE.md`, Graphify `graph.json`
+**Last updated**: 2026-08-11  
+**Data source**: `reports/function_inventory.md`, `docs/NEURAL_MAPPING.md`, `docs/GAS_ARCHITECTURE.md`, hasil GitNexus, dan Graphify lokal bila diregenerate

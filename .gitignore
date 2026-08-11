@@ -8,9 +8,15 @@ reports/
 CONTEXT_SUMMARY.md
 _local/
 deployment_urls.json
+graphify-out/
 graphify-out/cache/
 graphify-out/converted/
 graphify-out/.graphify_root
+absen_*.csv
+scratch/test_*.js
+Junk/active_root_legacy/
+Junk/scripts_legacy/
+Junk/clasp_root_legacy/
 
 # Local editor and OS files
 .clinerules

@@ -89,10 +89,19 @@ Aplikasi Android dibangun untuk memudahkan proses *tapping* kartu ID (NFC) oleh 
    - `geolocator`: Digunakan secara khusus saat *Scan Gate Keluar* untuk memvalidasi posisi latitude/longitude karyawan.
 6. **Handling Redirect (302)**: Google Apps Script Web App `exec` URL selalu melakukan HTTP 302 Redirect. Komunikasi API di Dart *wajib* menggunakan `dart:io HttpClient` untuk memanualisasi handling redirect; `http.post` biasa akan mengubah metode POST menjadi GET sehingga payload JSON hilang di tengah jalan.
 7. **Transport Guard untuk Aksi Gate**:
-   - Aksi yang mengubah state (`bindKartu`, `releaseKartu`, `scanAreaKerja`) diperlakukan sebagai *non-idempotent* di client Android.
-   - Request seperti itu tidak boleh di-*auto retry* secara buta setelah koneksi putus, karena retry kedua bisa bertabrakan dengan `withCardLock()` walau user hanya satu orang.
-   - Jika koneksi terputus setelah submit, client harus melakukan *reconciliation* dengan membaca `getBindingStatus()` untuk memastikan apakah proses server sebenarnya sudah sukses.
-   - Pesan `Kartu sedang diproses` pada kondisi jaringan buruk harus dibaca sebagai potensi request pertama masih/baru saja selesai di server, bukan otomatis berarti ada user lain yang sedang memakai kartu itu.
+   - Aksi gate Android sekarang tidak lagi menembak `bindKartu()` atau `releaseKartu()` secara langsung.
+   - Client mengirim `submitGateRequest` dengan `requestId` unik, lalu backend mencatat ledger ke sheet `ANDROID_GATE_REQUESTS`.
+   - Backend memproses request itu satu kali, menyimpan status `PENDING` / `PROCESSING` / `SUCCESS` / `FAILED`, lalu Android melakukan *poll* ke `getGateRequestStatus`.
+   - Jika koneksi putus setelah submit, Android tidak mengulang mutasi dengan request baru; ia selalu mengecek request lama dulu memakai `requestId` yang sama.
+   - Mekanisme ini membuat retry jaringan menjadi idempotent walau `bindKartu()` dan `releaseKartu()` sendiri tetap fungsi mutasi.
+8. **HTTP Client Lifecycle Android**:
+   - Transport Android tidak boleh membuat `HttpClient` baru untuk setiap request penting, karena itu memaksa DNS lookup, TCP connect, dan TLS handshake dari nol pada tiap call.
+   - Client koneksi dibagikan ulang agar koneksi keep-alive ke `script.google.com` dan `script.googleusercontent.com` bisa dipakai kembali.
+   - Jika terjadi `SocketException`, `HandshakeException`, atau `HttpException`, pool client harus di-reset agar socket rusak tidak diwariskan ke request berikutnya.
+9. **Ledger Request Gate**:
+   - Sheet `ANDROID_GATE_REQUESTS` adalah ledger request Android khusus untuk domain gate.
+   - Tujuannya bukan mengganti `withCardLock()`, tetapi menambah lapisan dedupe, observability, dan recovery saat response HTTP hilang di tengah jalan.
+   - `withCardLock()` tetap menjadi pengaman mutasi per kartu, sedangkan ledger request mencegah Android membuat keputusan ulang tanpa mengetahui hasil request sebelumnya.
 
 ## Workflow Operasional Satu Arah
 
@@ -143,11 +152,14 @@ Prinsip utamanya:
   - `confirmKeluar()`
 - backend:
   - `getBindingStatus()`
+  - `submitGateRequest()`
+  - `getGateRequestStatus()`
   - `bindKartu()`
   - `releaseKartu()`
   - `updateRecapAbsen()`
 - sheet utama:
   - `KARYAWAN`
+  - `ANDROID_GATE_REQUESTS`
   - `BINDING_KARTU_MK`
   - `REGISTRASI SAAT MASUK PABRIK`
   - `REGISTRASI SAAT KELUAR PABRIK`
@@ -157,6 +169,7 @@ Kontrak domain:
 
 - `bindKartu()` hanya membuka binding dan menulis log masuk.
 - `releaseKartu()` hanya menutup binding dan menulis log keluar.
+- `submitGateRequest()` adalah gateway Android yang memberi `requestId` idempotent di depan dua fungsi mutasi tadi.
 - recap harian harus selalu diturunkan dari dua log gate tersebut.
 
 ### 3. Area Kerja

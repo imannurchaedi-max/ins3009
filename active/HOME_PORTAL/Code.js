@@ -242,6 +242,12 @@ function doPost(e) {
       case 'getBindingStatus':
         result = getBindingStatus(payload.noKartuMK);
         break;
+      case 'submitGateRequest':
+        result = submitGateRequest(payload);
+        break;
+      case 'getGateRequestStatus':
+        result = getGateRequestStatus(payload.requestId);
+        break;
       case 'bindKartu':
         result = bindKartu(payload.noKartuMK, payload.nik, payload.loker, payload.lat, payload.lng);
         break;

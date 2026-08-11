@@ -219,6 +219,30 @@ Repo masih memuat terlalu banyak artifact audit lama, wrapper tooling yang dupli
 **Kondisi awal**
 Flow scanner kamera di web app sering gagal di Chrome mobile karena jalur aktif langsung bergantung ke `html5-qrcode`, sementara precheck izin/policy dan jalur native belum benar-benar dipakai.
 
+## FASE 18: Idempotent Queue untuk Android Gate
+
+**Tanggal**
+2026-08-11
+
+**Kondisi awal**
+Android gate masih bisa masuk ke kondisi buruk saat jaringan putus di momen submit: user melihat timeout, DNS error, atau `connection abort`, lalu scan ulang menghasilkan pesan kartu sedang diproses atau status yang terasa tidak konsisten.
+
+**Akar masalah**
+- GAS sebelumnya menerima mutasi gate Android secara langsung ke `bindKartu()` dan `releaseKartu()`.
+- Saat response HTTP hilang di tengah jalan, app tidak punya identitas request yang bisa dicek ulang ke server.
+- Retry manual dari user terlihat seperti request baru, padahal request pertama bisa saja sudah sukses dan hanya balasannya yang gagal kembali ke Android.
+
+**Solusi**
+- Menambah ledger request `ANDROID_GATE_REQUESTS` di backend GAS.
+- Menambah endpoint gateway `submitGateRequest()` dan `getGateRequestStatus()` di `doPost`.
+- Android gate sekarang mengirim `requestId` unik untuk tiap aksi masuk/keluar, lalu melakukan polling status request itu jika submit awal tidak mendapat jawaban final.
+- `bindKartu()` dan `releaseKartu()` tetap menjadi mesin mutasi utama, tetapi sekarang dibungkus oleh mekanisme idempotent request ledger agar retry jaringan tidak membuat collision buta.
+
+**Dampak**
+- Timeout atau `Failed host lookup` tidak lagi otomatis memaksa user scan ulang tanpa konteks.
+- Error `kartu sedang diproses` menjadi jauh lebih bisa ditelusuri karena status request disimpan eksplisit di sheet.
+- Arsitektur Android ke GAS berubah dari direct mutation menjadi submit-plus-poll gateway.
+
 **Akar masalah**
 - `startNativeCameraScanner()` masih stub.
 - `openLiveScanner()` melewati helper permission/policy yang sudah ada.
@@ -805,6 +829,36 @@ Error "Sistem sedang memproses scan lain" muncul di jam sibuk (06:00–07:00 Shi
 - Export CSV tetap full periode karena tetap diproses dari backend.
 
 **File**: `app.html`
+
+---
+
+## FASE 49: Gate Android Kurangi Cold-Start DNS dan Balapan Request
+
+**Tanggal**: 2026-08-11
+
+**Kondisi awal**
+- Error koneksi di gate Android masih sesekali muncul walau false retry pada aksi `MASUK/KELUAR` sudah dikurangi.
+- Pada jaringan 4G yang naik turun, user masih bisa melihat kombinasi error DNS, timeout, atau pesan proses kartu yang terasa tidak konsisten.
+- Perbaikan sebelumnya lebih fokus pada retry policy, tetapi belum menyentuh lifecycle koneksi HTTP dan perlindungan terhadap hasil async yang saling menimpa.
+
+**Akar masalah**
+- `ApiService._postInternal()` masih membuat `HttpClient` baru untuk setiap request, sehingga setiap scan, lookup, bind, dan release selalu mengulang DNS lookup, TCP connect, dan TLS handshake dari nol.
+- `GateScreen` belum memiliki guard internal yang cukup keras untuk menolak re-entry sangat cepat atau mengabaikan hasil request lama yang datang terlambat.
+- Reconciliation pasca putus koneksi masih terlalu singkat untuk kasus server Google Sheets/GAS yang sedang lambat menyelesaikan proses pertama.
+
+**Perbaikan**
+- `ApiService` sekarang memakai shared `HttpClient` dengan keep-alive, `maxConnectionsPerHost`, dan reset pool saat terjadi socket/handshake/http exception.
+- URL dasar GAS diparsing sekali dan dipakai ulang agar jalur transport lebih stabil dan tidak membangun objek URI baru berulang-ulang.
+- `GateScreen` sekarang menambahkan request id untuk lookup kartu dan mutasi gate agar hasil async lama tidak bisa menimpa state terbaru.
+- `MASUK` dan `KELUAR` sekarang punya guard re-entry berbasis `_isScanning`, bukan hanya mengandalkan disable tombol setelah rebuild frame.
+- Reconciliation sesudah transport failure diubah menjadi polling bertahap beberapa kali, bukan satu cek cepat saja.
+
+**Dampak**
+- Frekuensi cold-start DNS/TLS pada jalur gate turun signifikan.
+- Risiko double-submit lokal dan stale response yang menimpa hasil terbaru ikut turun.
+- Kasus “request pertama sebenarnya sedang selesai di server, tapi app terlalu cepat menganggap gagal” jadi lebih tertangani.
+
+**File**: `android_app/lib/services/api_service.dart` · `android_app/lib/screens/gate_screen.dart` · `docs/GAS_ARCHITECTURE.md`
 
 ---
 

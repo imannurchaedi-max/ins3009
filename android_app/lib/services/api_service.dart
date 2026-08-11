@@ -14,6 +14,8 @@ class ApiService {
     'deleteJadwalShift',
     'bulkSaveJadwalShift',
   };
+  static final Uri _baseUri = Uri.parse(ApiConfig.baseUrl);
+  static HttpClient? _sharedClient;
 
   /// Sends a POST request to the Google Apps Script doPost endpoint.
   ///
@@ -96,9 +98,7 @@ class ApiService {
 
   static Future<Map<String, dynamic>> _postInternal(
       String action, Map<String, dynamic> payload) async {
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 30);
-    client.idleTimeout = const Duration(seconds: 30);
+    final client = _getClient();
 
     try {
       // Flatten payload into top-level body (GAS doPost reads from root level)
@@ -110,8 +110,7 @@ class ApiService {
 
       final bodyBytes = utf8.encode(jsonEncode(requestBody));
 
-      HttpClientRequest request =
-          await client.postUrl(Uri.parse(ApiConfig.baseUrl));
+      HttpClientRequest request = await client.postUrl(_baseUri);
       request.headers.set('Content-Type', 'application/json');
       request.headers.set('Accept', 'application/json');
       request.followRedirects = false; // We handle redirects manually
@@ -165,9 +164,35 @@ class ApiService {
           'msg': 'HTTP Error: ${response.statusCode} — body: $responseBody'
         };
       }
-    } finally {
-      client.close();
+    } on SocketException {
+      _resetClient();
+      rethrow;
+    } on HandshakeException {
+      _resetClient();
+      rethrow;
+    } on HttpException {
+      _resetClient();
+      rethrow;
     }
+  }
+
+  static HttpClient _getClient() {
+    final existing = _sharedClient;
+    if (existing != null) return existing;
+
+    final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 30);
+    client.idleTimeout = const Duration(seconds: 45);
+    client.maxConnectionsPerHost = 6;
+    client.userAgent = 'DAM-Access-Control-Android/1.0';
+    _sharedClient = client;
+    return client;
+  }
+
+  static void _resetClient() {
+    final client = _sharedClient;
+    _sharedClient = null;
+    client?.close(force: true);
   }
 
   static bool _shouldRetryResult(Map<String, dynamic> result) {

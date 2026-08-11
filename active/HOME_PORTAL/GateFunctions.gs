@@ -224,6 +224,287 @@ function getBindingStatus(noKartuMK) {
   }
 }
 
+function normalizeGateRequestId_(requestId) {
+  return asText(requestId).trim().replace(/[^A-Z0-9._:-]/gi, '').slice(0, 80);
+}
+
+function normalizeGateRequestAction_(action) {
+  const value = asText(action).trim();
+  if (value === 'bindKartu' || value === 'releaseKartu') return value;
+  return '';
+}
+
+function sanitizeGateRequestPayload_(action, payload) {
+  const source = payload && typeof payload === 'object' ? payload : {};
+  if (action === 'bindKartu') {
+    return {
+      noKartuMK: asText(source.noKartuMK).trim(),
+      nik: asText(source.nik).trim(),
+      loker: asText(source.loker).trim(),
+      lat: source.lat,
+      lng: source.lng
+    };
+  }
+  return {
+    noKartuMK: asText(source.noKartuMK).trim(),
+    loker: asText(source.loker).trim(),
+    lat: source.lat,
+    lng: source.lng
+  };
+}
+
+function buildGateRequestPartitionKey_(action, payload) {
+  const cardKey = normalizeCard(payload && payload.noKartuMK);
+  const nikKey = asText(payload && payload.nik).trim();
+  if (action === 'bindKartu' && nikKey) {
+    return 'CARD:' + cardKey + '|NIK:' + nikKey;
+  }
+  return 'CARD:' + cardKey;
+}
+
+function parseGateRequestJson_(value) {
+  const text = asText(value).trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch(e) {
+    return null;
+  }
+}
+
+function buildGateRequestRecordFromRow_(row, rowNumber) {
+  return {
+    row: rowNumber,
+    requestId: asText(row[0]).trim(),
+    action: asText(row[1]).trim(),
+    partitionKey: asText(row[2]).trim(),
+    noKartuMK: asText(row[3]).trim(),
+    nik: asText(row[4]).trim(),
+    status: asText(row[5]).trim().toUpperCase(),
+    createdAt: asText(row[6]).trim(),
+    updatedAt: asText(row[7]).trim(),
+    attemptCount: parseInt(row[8], 10) || 0,
+    payloadJson: asText(row[9]).trim(),
+    payload: parseGateRequestJson_(row[9]) || {},
+    responseJson: asText(row[10]).trim(),
+    response: parseGateRequestJson_(row[10]),
+    lastError: asText(row[11]).trim()
+  };
+}
+
+function findGateRequestRecordById_(sheet, requestId) {
+  const target = normalizeGateRequestId_(requestId);
+  if (!target) return null;
+
+  const data = sheet.getDataRange().getValues();
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (asText(data[i][0]).trim() !== target) continue;
+    return buildGateRequestRecordFromRow_(data[i], i + 1);
+  }
+  return null;
+}
+
+function buildGateRequestApiResponse_(record) {
+  if (!record) return { ok: false, msg: 'Request gate tidak ditemukan.' };
+
+  const status = asText(record.status).trim().toUpperCase();
+  if (status === 'PENDING' || status === 'PROCESSING') {
+    return {
+      ok: true,
+      pending: true,
+      requestId: record.requestId,
+      requestAction: record.action,
+      requestStatus: status,
+      msg: status === 'PROCESSING'
+        ? 'Request sedang diproses. Mohon tunggu beberapa detik.'
+        : 'Request sudah diterima dan menunggu diproses.'
+    };
+  }
+
+  const response = (record.response && typeof record.response === 'object')
+    ? Object.assign({}, record.response)
+    : { ok: status === 'SUCCESS', msg: record.lastError || 'Request selesai diproses.' };
+
+  response.requestId = record.requestId;
+  response.requestAction = record.action;
+  response.requestStatus = status;
+  response.pending = false;
+  return response;
+}
+
+function processGateRequestById_(requestId) {
+  const normalizedRequestId = normalizeGateRequestId_(requestId);
+  if (!normalizedRequestId) {
+    return { ok: false, msg: 'requestId gate tidak valid.' };
+  }
+
+  const claim = withDocumentLock(function() {
+    const sheet = getSheet(SHEET_GATE_REQUESTS);
+    const record = findGateRequestRecordById_(sheet, normalizedRequestId);
+    if (!record) return { ok: false, msg: 'Request gate tidak ditemukan.' };
+
+    if (record.status === 'SUCCESS' || record.status === 'FAILED') {
+      return { ok: true, mode: 'final', record: record };
+    }
+
+    const nowText = formatDateTime(nowWIB());
+    const nextAttempt = (record.attemptCount || 0) + 1;
+    sheet.getRange(record.row, 6).setValue('PROCESSING');
+    sheet.getRange(record.row, 8).setValue(nowText);
+    sheet.getRange(record.row, 9).setValue(nextAttempt);
+    applyNumberFormatToCell_(sheet, record.row, 8, '@');
+
+    return {
+      ok: true,
+      mode: 'claimed',
+      record: Object.assign({}, record, {
+        status: 'PROCESSING',
+        updatedAt: nowText,
+        attemptCount: nextAttempt
+      })
+    };
+  });
+
+  if (!claim || claim.ok === false) return claim || { ok: false, msg: 'Gagal klaim request gate.' };
+  if (claim.mode === 'final') return buildGateRequestApiResponse_(claim.record);
+
+  const record = claim.record;
+  const payload = record.payload || {};
+  let result;
+
+  try {
+    if (record.action === 'bindKartu') {
+      result = bindKartu(payload.noKartuMK, payload.nik, payload.loker, payload.lat, payload.lng);
+    } else if (record.action === 'releaseKartu') {
+      result = releaseKartu(payload.noKartuMK, payload.loker, payload.lat, payload.lng);
+    } else {
+      result = { ok: false, msg: 'Action queue gate tidak dikenali: ' + record.action };
+    }
+  } catch(eProcess) {
+    result = { ok: false, msg: eProcess.message };
+  }
+
+  const finalized = withDocumentLock(function() {
+    const sheet = getSheet(SHEET_GATE_REQUESTS);
+    const latest = findGateRequestRecordById_(sheet, normalizedRequestId);
+    if (!latest) return { ok: false, msg: 'Request gate hilang saat finalisasi.' };
+    if (latest.status === 'SUCCESS' || latest.status === 'FAILED') {
+      return { ok: true, record: latest };
+    }
+
+    const finalStatus = result && result.ok ? 'SUCCESS' : 'FAILED';
+    const updatedAt = formatDateTime(nowWIB());
+    const responseJson = JSON.stringify(result || { ok: false, msg: 'Request gate tidak menghasilkan response.' });
+    const lastError = result && result.ok ? '' : asText(result && result.msg).trim();
+
+    sheet.getRange(latest.row, 6).setValue(finalStatus);
+    sheet.getRange(latest.row, 8).setValue(updatedAt);
+    sheet.getRange(latest.row, 11).setValue(responseJson);
+    sheet.getRange(latest.row, 12).setValue(lastError);
+    applyNumberFormatToCell_(sheet, latest.row, 8, '@');
+    applyNumberFormatToCell_(sheet, latest.row, 11, '@');
+    applyNumberFormatToCell_(sheet, latest.row, 12, '@');
+
+    return {
+      ok: true,
+      record: Object.assign({}, latest, {
+        status: finalStatus,
+        updatedAt: updatedAt,
+        responseJson: responseJson,
+        response: result,
+        lastError: lastError
+      })
+    };
+  });
+
+  if (!finalized || finalized.ok === false) return finalized || { ok: false, msg: 'Gagal finalisasi request gate.' };
+  return buildGateRequestApiResponse_(finalized.record);
+}
+
+function submitGateRequest(payload) {
+  try {
+    const source = payload && typeof payload === 'object' ? payload : {};
+    const requestId = normalizeGateRequestId_(source.requestId);
+    const action = normalizeGateRequestAction_(source.requestAction || source.targetAction || source.action);
+    if (!requestId) return { ok: false, msg: 'requestId wajib diisi untuk submit gate request.' };
+    if (!action) return { ok: false, msg: 'Action gate tidak valid.' };
+
+    const safePayload = sanitizeGateRequestPayload_(action, source);
+    const payloadJson = JSON.stringify(safePayload);
+
+    const registered = withDocumentLock(function() {
+      const sheet = getSheet(SHEET_GATE_REQUESTS);
+      const existing = findGateRequestRecordById_(sheet, requestId);
+      if (existing) {
+        if (existing.action !== action) {
+          return { ok: false, msg: 'requestId sudah dipakai untuk action yang berbeda.' };
+        }
+        if (existing.payloadJson && existing.payloadJson !== payloadJson) {
+          return { ok: false, msg: 'requestId sudah dipakai untuk payload gate yang berbeda.' };
+        }
+        return { ok: true, mode: 'existing', record: existing };
+      }
+
+      const nowText = formatDateTime(nowWIB());
+      sheet.appendRow([
+        requestId,
+        action,
+        buildGateRequestPartitionKey_(action, safePayload),
+        asText(safePayload.noKartuMK).trim(),
+        asText(safePayload.nik).trim(),
+        'PENDING',
+        nowText,
+        nowText,
+        0,
+        payloadJson,
+        '',
+        ''
+      ]);
+
+      const row = sheet.getLastRow();
+      applyNumberFormatToCell_(sheet, row, 1, '@');
+      applyNumberFormatToCell_(sheet, row, 7, '@');
+      applyNumberFormatToCell_(sheet, row, 8, '@');
+      applyNumberFormatToCell_(sheet, row, 10, '@');
+      return { ok: true, mode: 'created' };
+    });
+
+    if (!registered || registered.ok === false) {
+      return registered || { ok: false, msg: 'Gagal mendaftarkan request gate.' };
+    }
+    if (registered.mode === 'existing') {
+      return buildGateRequestApiResponse_(registered.record);
+    }
+
+    return processGateRequestById_(requestId);
+  } catch(e) {
+    return { ok: false, msg: e.message };
+  }
+}
+
+function getGateRequestStatus(requestId) {
+  try {
+    const normalizedRequestId = normalizeGateRequestId_(requestId);
+    if (!normalizedRequestId) {
+      return { ok: false, msg: 'requestId wajib diisi untuk cek status gate.' };
+    }
+
+    const sheet = getSheet(SHEET_GATE_REQUESTS);
+    const record = findGateRequestRecordById_(sheet, normalizedRequestId);
+    if (!record) {
+      return {
+        ok: false,
+        requestId: normalizedRequestId,
+        requestStatus: 'UNKNOWN',
+        msg: 'Request gate tidak ditemukan.'
+      };
+    }
+    return buildGateRequestApiResponse_(record);
+  } catch(e) {
+    return { ok: false, msg: e.message };
+  }
+}
+
 // ── Bind Kartu (Masuk Pabrik) ─────────────────────────────
 function bindKartu(noKartuMK, nik, loker, userLat, userLng) {
   // ── VALIDASI GPS LOKASI (sebelum lock apapun) ─────────────

@@ -27,6 +27,8 @@ class _GateScreenState extends State<GateScreen> {
   Map<String, dynamic>? _targetEmployee;
   bool _isLookingUpTarget = false;
   Timer? _targetLookupDebounce;
+  int _cardLookupRequestId = 0;
+  int _gateMutationRequestId = 0;
 
   @override
   void dispose() {
@@ -177,6 +179,9 @@ class _GateScreenState extends State<GateScreen> {
     String cardCode, {
     required String sourceLabel,
   }) async {
+    if (_isScanning) return;
+    final requestId = ++_cardLookupRequestId;
+
     setState(() {
       _isScanning = true;
       _scannedData = null;
@@ -186,7 +191,7 @@ class _GateScreenState extends State<GateScreen> {
 
     final result = await _fetchCardStatus(cardCode);
 
-    if (!mounted) return;
+    if (!mounted || requestId != _cardLookupRequestId) return;
 
     setState(() {
       _isScanning = false;
@@ -221,26 +226,152 @@ class _GateScreenState extends State<GateScreen> {
     });
   }
 
-  Future<bool> _reconcileMasukAfterTransportFailure(
-    String cardCode,
-    String targetNik,
-  ) async {
-    await Future<void>.delayed(const Duration(milliseconds: 900));
-    final check = await _fetchCardStatus(cardCode);
-    if (check['ok'] != true) return false;
-
-    final status = (check['status'] ?? '').toString().toUpperCase();
-    final boundNik = (check['nik'] ?? '').toString().trim();
-    return status == 'BOUND' && boundNik == targetNik.trim();
+  String _sanitizeGateRequestToken(String value) {
+    return value.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '').toUpperCase();
   }
 
-  Future<bool> _reconcileKeluarAfterTransportFailure(String cardCode) async {
-    await Future<void>.delayed(const Duration(milliseconds: 900));
-    final check = await _fetchCardStatus(cardCode);
-    if (check['ok'] != true) return false;
+  String _buildGateRequestId(
+    String requestAction,
+    String cardCode,
+    int requestNonce,
+  ) {
+    final actionToken = _sanitizeGateRequestToken(requestAction);
+    final cardToken = _sanitizeGateRequestToken(cardCode);
+    final timestamp = DateTime.now().toUtc().microsecondsSinceEpoch;
+    return 'gate.${actionToken.isEmpty ? 'ACTION' : actionToken}.'
+        '${cardToken.isEmpty ? 'CARD' : cardToken}.$timestamp.$requestNonce';
+  }
 
-    final status = (check['status'] ?? '').toString().toUpperCase();
-    return status == 'FREE';
+  bool _isPendingGateResponse(Map<String, dynamic>? result) {
+    if (result == null) return false;
+    final status = (result['requestStatus'] ?? '').toString().toUpperCase();
+    return result['pending'] == true ||
+        status == 'PENDING' ||
+        status == 'PROCESSING';
+  }
+
+  bool _isUnknownGateResponse(Map<String, dynamic>? result) {
+    if (result == null) return false;
+    final status = (result['requestStatus'] ?? '').toString().toUpperCase();
+    final message = (result['msg'] ?? '').toString().toLowerCase();
+    return status == 'UNKNOWN' || message.contains('tidak ditemukan');
+  }
+
+  Future<Map<String, dynamic>> _recoverGateMutationStatus({
+    required int requestNonce,
+    required String requestId,
+    required String requestAction,
+    required Map<String, dynamic> submitPayload,
+  }) async {
+    final delaysMs = <int>[700, 1100, 1600, 2200, 3000];
+    Map<String, dynamic> lastResult = <String, dynamic>{
+      'ok': false,
+      'pending': true,
+      'requestId': requestId,
+      'requestAction': requestAction,
+      'requestStatus': 'PENDING',
+      'msg': 'Request gate sedang diproses.',
+    };
+    var hasResubmitted = false;
+
+    for (final delayMs in delaysMs) {
+      await Future<void>.delayed(Duration(milliseconds: delayMs));
+      if (!mounted || requestNonce != _gateMutationRequestId) {
+        return <String, dynamic>{
+          'ok': false,
+          'msg': 'Request gate dibatalkan karena ada aksi baru.',
+        };
+      }
+
+      final statusResult = await ApiService.post('getGateRequestStatus', {
+        'requestId': requestId,
+      });
+      lastResult = statusResult;
+
+      if (statusResult['ok'] == true && !_isPendingGateResponse(statusResult)) {
+        return statusResult;
+      }
+
+      if (_isPendingGateResponse(statusResult)) {
+        continue;
+      }
+
+      if (!hasResubmitted &&
+          (_isUnknownGateResponse(statusResult) ||
+              ApiService.isConnectivityFailureResult(statusResult))) {
+        hasResubmitted = true;
+        final replayResult =
+            await ApiService.post('submitGateRequest', submitPayload);
+        lastResult = replayResult;
+
+        if (replayResult['ok'] == true &&
+            !_isPendingGateResponse(replayResult)) {
+          return replayResult;
+        }
+      }
+    }
+
+    if (_isPendingGateResponse(lastResult)) {
+      return <String, dynamic>{
+        'ok': false,
+        'pending': true,
+        'requestId': requestId,
+        'requestAction': requestAction,
+        'requestStatus': (lastResult['requestStatus'] ?? 'PROCESSING')
+            .toString()
+            .toUpperCase(),
+        'msg':
+            'Request sudah diterima server tetapi belum selesai dikonfirmasi. Tunggu beberapa detik lalu cek lagi.',
+      };
+    }
+
+    return lastResult;
+  }
+
+  Future<Map<String, dynamic>> _submitGateMutation({
+    required int requestNonce,
+    required String requestAction,
+    required Map<String, dynamic> mutationPayload,
+  }) async {
+    final requestId = _buildGateRequestId(
+      requestAction,
+      (mutationPayload['noKartuMK'] ?? '').toString(),
+      requestNonce,
+    );
+    final submitPayload = <String, dynamic>{
+      'requestId': requestId,
+      'requestAction': requestAction,
+      ...mutationPayload,
+    };
+
+    final submitResult =
+        await ApiService.post('submitGateRequest', submitPayload);
+    if (submitResult['ok'] == true && !_isPendingGateResponse(submitResult)) {
+      return submitResult;
+    }
+
+    if (mounted && requestNonce == _gateMutationRequestId) {
+      setState(() {
+        _statusMessage = _isPendingGateResponse(submitResult)
+            ? (submitResult['msg']?.toString() ??
+                'Request diterima server. Menunggu konfirmasi hasil...')
+            : 'Koneksi sempat terputus. Sedang cek status request ke server...';
+        _statusColor = Colors.blue;
+      });
+    }
+
+    if (_isPendingGateResponse(submitResult) ||
+        ApiService.isConnectivityFailureResult(submitResult) ||
+        _isUnknownGateResponse(submitResult)) {
+      return _recoverGateMutationStatus(
+        requestNonce: requestNonce,
+        requestId: requestId,
+        requestAction: requestAction,
+        submitPayload: submitPayload,
+      );
+    }
+
+    return submitResult;
   }
 
   Future<void> _scanCardWithCamera() async {
@@ -288,7 +419,8 @@ class _GateScreenState extends State<GateScreen> {
   }
 
   Future<void> _prosesMasuk() async {
-    if (_scannedData == null) return;
+    if (_scannedData == null || _isScanning) return;
+    final requestId = ++_gateMutationRequestId;
 
     final sessionProvider =
         Provider.of<SessionProvider>(context, listen: false);
@@ -313,7 +445,7 @@ class _GateScreenState extends State<GateScreen> {
 
     if (isAssistRole) {
       final targetReady = await _ensureTargetEmployeeReady(targetNik);
-      if (!mounted) return;
+      if (!mounted || requestId != _gateMutationRequestId) return;
       if (!targetReady) {
         setState(() {
           _statusMessage =
@@ -341,15 +473,19 @@ class _GateScreenState extends State<GateScreen> {
 
     try {
       final position = await GpsService.getCurrentPosition();
-      final result = await ApiService.post('bindKartu', {
-        'noKartuMK': uid,
-        'nik': targetNik,
-        'loker': _lokerController.text.trim(),
-        'lat': position?.latitude,
-        'lng': position?.longitude,
-      });
+      final result = await _submitGateMutation(
+        requestNonce: requestId,
+        requestAction: 'bindKartu',
+        mutationPayload: <String, dynamic>{
+          'noKartuMK': uid,
+          'nik': targetNik,
+          'loker': _lokerController.text.trim(),
+          'lat': position?.latitude,
+          'lng': position?.longitude,
+        },
+      );
 
-      if (!mounted) return;
+      if (!mounted || requestId != _gateMutationRequestId) return;
 
       setState(() {
         _isScanning = false;
@@ -364,28 +500,10 @@ class _GateScreenState extends State<GateScreen> {
           }
         } else {
           _statusMessage = result['msg']?.toString() ?? 'Gagal masuk pabrik';
-          _statusColor = Colors.red;
+          _statusColor =
+              _isPendingGateResponse(result) ? Colors.orange : Colors.red;
         }
       });
-
-      if (result['ok'] != true &&
-          ApiService.isConnectivityFailureResult(result)) {
-        final recovered = await _reconcileMasukAfterTransportFailure(
-            uid.toString(), targetNik);
-        if (!mounted || !recovered) return;
-
-        setState(() {
-          _statusMessage =
-              'Koneksi sempat terputus, tetapi proses masuk sudah tercatat di server.';
-          _statusColor = Colors.green;
-          _scannedData = null;
-          _lokerController.clear();
-          if (isAssistRole) {
-            _targetNikController.clear();
-            _targetEmployee = null;
-          }
-        });
-      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -397,7 +515,8 @@ class _GateScreenState extends State<GateScreen> {
   }
 
   Future<void> _prosesKeluar() async {
-    if (_scannedData == null) return;
+    if (_scannedData == null || _isScanning) return;
+    final requestId = ++_gateMutationRequestId;
 
     final uid = _scannedData!['noKartuMK'];
     final loker = _scannedData!['loker'] ?? '';
@@ -410,14 +529,18 @@ class _GateScreenState extends State<GateScreen> {
 
     try {
       final position = await GpsService.getCurrentPosition();
-      final result = await ApiService.post('releaseKartu', {
-        'noKartuMK': uid,
-        'loker': loker,
-        'lat': position?.latitude,
-        'lng': position?.longitude,
-      });
+      final result = await _submitGateMutation(
+        requestNonce: requestId,
+        requestAction: 'releaseKartu',
+        mutationPayload: <String, dynamic>{
+          'noKartuMK': uid,
+          'loker': loker,
+          'lat': position?.latitude,
+          'lng': position?.longitude,
+        },
+      );
 
-      if (!mounted) return;
+      if (!mounted || requestId != _gateMutationRequestId) return;
 
       setState(() {
         _isScanning = false;
@@ -429,24 +552,10 @@ class _GateScreenState extends State<GateScreen> {
           _lokerController.clear();
         } else {
           _statusMessage = result['msg']?.toString() ?? 'Gagal keluar';
-          _statusColor = Colors.red;
+          _statusColor =
+              _isPendingGateResponse(result) ? Colors.orange : Colors.red;
         }
       });
-
-      if (result['ok'] != true &&
-          ApiService.isConnectivityFailureResult(result)) {
-        final recovered =
-            await _reconcileKeluarAfterTransportFailure(uid.toString());
-        if (!mounted || !recovered) return;
-
-        setState(() {
-          _statusMessage =
-              'Koneksi sempat terputus, tetapi proses keluar sudah tercatat di server.';
-          _statusColor = Colors.green;
-          _scannedData = null;
-          _lokerController.clear();
-        });
-      }
     } catch (e) {
       if (!mounted) return;
       setState(() {

@@ -15,7 +15,7 @@ Dokumen ini merangkum kontrak input, output, dependency sheet, dan caller untuk 
 | Operation | Caller | Input | Output | Read Sheet | Write Sheet | Dependency Penting |
 |---|---|---|---|---|---|---|
 | `verifyLogin(nik, password)` | `app.html::handleLoginSubmit()`, `android_app/lib/providers/session_provider.dart` | `nik`, `password` | `ok`, `msg`, `karyawan`, `depts` | `KARYAWAN` | - | password kosong masih valid untuk user tertentu; payload user dibentuk oleh `makeKaryawanPayload()` |
-| `verifySession(nik/sessionToken)` | `app.html::restoreSavedSession()`, Android bootstrap session | `nik` atau `sessionToken` | `ok`, `msg`, `karyawan`, `depts` | `KARYAWAN` | - | session Android memakai `sessionToken || nik` |
+| `verifySession(nik/sessionToken)` | `app.html::restoreSavedSession()`, Android bootstrap session | `nik` atau `sessionToken` | `ok`, `msg`, `karyawan`, `depts` | `KARYAWAN` | - | session Android memakai `sessionToken || nik`; restore lokal berjalan dulu lalu verify di background |
 | `searchKaryawan(query)` | web search, Android helper tertentu | `query` | `ok`, `data[]` | `KARYAWAN` | - | minimum length query harus valid |
 
 ## Gate / Pabrik

@@ -75,11 +75,19 @@ Aplikasi Android dibangun untuk memudahkan proses *tapping* kartu ID (NFC) oleh 
 
 1. **Stack**: Frontend menggunakan Flutter (Dart), Backend menggunakan GAS (`Code.js` -> `doPost`).
 2. **HTTP Router**: `doPost(e)` di `Code.js` menerima payload JSON yang di-*flatten* (terdiri dari `apiKey`, `action`, dan parameter lain). Jika `apiKey` cocok, request akan di-route ke fungsi backend yang sama persis seperti yang digunakan Web App.
-3. **Session**: Setelah fungsi `verifyLogin` berhasil, aplikasi Dart menyimpan data session (Role, NIK, Nama) ke dalam `SharedPreferences`.
-4. **Hardware Integrations**:
+3. **Session Shell**:
+   - `SessionProvider` adalah source of truth auth state Android.
+   - `AuthWrapper` memutuskan hanya dua state root: `LoginScreen` atau `HomeScreen`.
+   - `LoginScreen` dan `HomeScreen` tidak lagi menjadi pengendali navigasi auth utama; keduanya hanya memicu perubahan state ke `SessionProvider`.
+4. **Session Restore**:
+   - Setelah fungsi `verifyLogin` berhasil, aplikasi Dart menyimpan data session (Role, NIK, Nama) ke dalam `SharedPreferences`.
+   - Saat app dibuka ulang, session lokal dipulihkan secara **optimistis** agar user bisa langsung masuk tanpa menunggu round-trip backend.
+   - `verifySession` tetap dipanggil di background untuk revalidasi payload user.
+   - Refresh session lama tidak boleh menimpa hasil login/logout yang lebih baru; guard dilakukan di `SessionProvider` lewat versioned auth state.
+5. **Hardware Integrations**:
    - `flutter_nfc_kit`: Digunakan untuk membaca UID/Serial kartu MIFARE/RFID dari ID Karyawan saat melakukan *Scan Gate* maupun *Scan Area*.
    - `geolocator`: Digunakan secara khusus saat *Scan Gate Keluar* untuk memvalidasi posisi latitude/longitude karyawan.
-5. **Handling Redirect (302)**: Google Apps Script Web App `exec` URL selalu melakukan HTTP 302 Redirect. Komunikasi API di Dart *wajib* menggunakan `dart:io HttpClient` untuk memanualisasi handling redirect; `http.post` biasa akan mengubah metode POST menjadi GET sehingga payload JSON hilang di tengah jalan.
+6. **Handling Redirect (302)**: Google Apps Script Web App `exec` URL selalu melakukan HTTP 302 Redirect. Komunikasi API di Dart *wajib* menggunakan `dart:io HttpClient` untuk memanualisasi handling redirect; `http.post` biasa akan mengubah metode POST menjadi GET sehingga payload JSON hilang di tengah jalan.
 
 ## Workflow Operasional Satu Arah
 
@@ -222,6 +230,23 @@ Kontrak domain:
   - `type`
   - `exp`
 - Session dipakai ulang di shell yang sama karena seluruh UX utama hidup di satu origin GAS.
+
+### Session Android
+
+- Session Android disimpan di `SharedPreferences` dengan key `user_session`.
+- Payload session Android minimal memuat:
+  - `sessionToken`
+  - `nik`
+  - `nama`
+  - `departemen`
+  - `jabatan`
+  - `role`
+- Kontrak runtime aktif Android:
+  - restore local session lebih dulu
+  - `AuthWrapper` langsung render `HomeScreen` jika session lokal valid secara struktur
+  - `verifySession()` berjalan di background untuk sinkronisasi data user terbaru
+  - kegagalan konektivitas saat bootstrap tidak boleh melempar user kembali ke login
+  - logout dan login baru harus menonaktifkan bootstrap/session refresh lama agar tidak terjadi race condition
 
 ## Role dan Akses Tab
 

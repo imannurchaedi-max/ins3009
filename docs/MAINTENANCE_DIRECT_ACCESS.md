@@ -28,7 +28,7 @@ Gunakan urutan ini agar tidak tersesat:
 
 | Kasus | Baca Dokumen | File Utama | Fungsi / Entry Point |
 |---|---|---|---|
-| Login gagal / session loop | `GAS_ARCHITECTURE.md`, `NEURAL_MAPPING.md`, `BLAST_RADIUS.md` | `active/HOME_PORTAL/SharedLib.gs`, `active/HOME_PORTAL/app.html`, `android_app/lib/providers/session_provider.dart`, `android_app/lib/services/api_service.dart` | `verifyLogin()`, `verifySession()`, `handleLoginSubmit()`, `restoreSavedSession()`, `ApiService.post()` |
+| Login gagal / session loop | `GAS_ARCHITECTURE.md`, `NEURAL_MAPPING.md`, `BLAST_RADIUS.md` | `active/HOME_PORTAL/SharedLib.gs`, `active/HOME_PORTAL/app.html`, `android_app/lib/main.dart`, `android_app/lib/providers/session_provider.dart`, `android_app/lib/screens/login_screen.dart`, `android_app/lib/screens/home_screen.dart`, `android_app/lib/services/api_service.dart` | `verifyLogin()`, `verifySession()`, `handleLoginSubmit()`, `restoreSavedSession()`, `AuthWrapper`, `SessionProvider.login()`, `SessionProvider.logout()`, `ApiService.post()` |
 | Gate masuk / keluar bermasalah | `OPERATIONAL_WORKFLOW.md`, `INPUT_OUTPUT_DEPENDENCY_MAP.md`, `BLAST_RADIUS.md` | `active/HOME_PORTAL/GateFunctions.gs`, `active/HOME_PORTAL/app.html`, `android_app/lib/screens/gate_screen.dart` | `bindKartu()`, `releaseKartu()`, `getBindingStatus()`, `confirmMasuk()`, `confirmKeluar()` |
 | Scan area / NFC / kamera bermasalah | `NEURAL_MAPPING.md`, `INPUT_OUTPUT_DEPENDENCY_MAP.md`, `BLAST_RADIUS.md` | `active/HOME_PORTAL/AreaFunctions.gs`, `android_app/lib/screens/area_screen.dart`, `android_app/lib/services/scan_payload_service.dart` | `scanAreaKerja()`, `getRecentAreaLogs()`, `submitScan()` |
 | Dashboard lambat / loop / data tidak cocok | `GAS_ARCHITECTURE.md`, `NEURAL_MAPPING.md`, `INPUT_OUTPUT_DEPENDENCY_MAP.md` | `active/HOME_PORTAL/AreaFunctions.gs`, `android_app/lib/screens/dashboard_screen.dart` | `getDashboardData()`, `getKehadiranDashboard()` |
@@ -50,6 +50,8 @@ Gunakan urutan ini agar tidak tersesat:
 - Semua request masuk ke `Code.js::doPost()`
 - Router `action` mengarah ke fungsi GAS yang sama dengan web
 - Semua request Android lewat `android_app/lib/services/api_service.dart`
+- Root auth Android ditentukan oleh `AuthWrapper` di `android_app/lib/main.dart`
+- Session Android dikelola penuh oleh `SessionProvider`
 
 ## File Access Map
 

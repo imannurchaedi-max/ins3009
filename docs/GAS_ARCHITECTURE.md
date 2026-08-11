@@ -102,6 +102,11 @@ Aplikasi Android dibangun untuk memudahkan proses *tapping* kartu ID (NFC) oleh 
    - Sheet `ANDROID_GATE_REQUESTS` adalah ledger request Android khusus untuk domain gate.
    - Tujuannya bukan mengganti `withCardLock()`, tetapi menambah lapisan dedupe, observability, dan recovery saat response HTTP hilang di tengah jalan.
    - `withCardLock()` tetap menjadi pengaman mutasi per kartu, sedangkan ledger request mencegah Android membuat keputusan ulang tanpa mengetahui hasil request sebelumnya.
+10. **Diagnostics & Warmup**:
+   - Android menyimpan event diagnostik lokal saat request sukses, gagal, timeout, DNS error, atau recovery polling berjalan.
+   - Event itu di-flush ke GAS lewat `logAndroidDiagnostics` pada request sukses berikutnya, sehingga kegagalan mobile tetap bisa diaudit walau saat error terjadi backend tidak sempat menerima request utama.
+   - Sheet `ANDROID_DIAGNOSTICS` dipakai sebagai tab audit koneksi Android.
+   - Saat `HomeScreen` terbuka, Android melakukan `pingAndroidGateway` sebagai prewarm agar DNS, redirect, dan TLS handshake tidak semuanya terjadi tepat di scan pertama user.
 
 ## Workflow Operasional Satu Arah
 
@@ -154,12 +159,15 @@ Prinsip utamanya:
   - `getBindingStatus()`
   - `submitGateRequest()`
   - `getGateRequestStatus()`
+  - `pingAndroidGateway()`
+  - `logAndroidDiagnostics()`
   - `bindKartu()`
   - `releaseKartu()`
   - `updateRecapAbsen()`
 - sheet utama:
   - `KARYAWAN`
   - `ANDROID_GATE_REQUESTS`
+  - `ANDROID_DIAGNOSTICS`
   - `BINDING_KARTU_MK`
   - `REGISTRASI SAAT MASUK PABRIK`
   - `REGISTRASI SAAT KELUAR PABRIK`

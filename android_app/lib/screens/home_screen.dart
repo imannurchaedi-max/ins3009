@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/session_provider.dart';
+import '../services/api_service.dart';
 import 'gate_screen.dart';
 import 'area_screen.dart';
 import 'dashboard_screen.dart';
@@ -15,6 +18,25 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
+  bool _gatewayHealthy = false;
+  String _gatewayStatus = 'Menyambungkan gateway...';
+  Timer? _gatewayWarmupTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _warmupGateway();
+    _gatewayWarmupTimer = Timer.periodic(
+      const Duration(seconds: 90),
+      (_) => _warmupGateway(silent: true),
+    );
+  }
+
+  @override
+  void dispose() {
+    _gatewayWarmupTimer?.cancel();
+    super.dispose();
+  }
 
   String _resolveRole(String role) {
     switch (role.toUpperCase().trim()) {
@@ -79,6 +101,24 @@ class _HomeScreenState extends State<HomeScreen> {
     await sessionProvider.logout();
   }
 
+  Future<void> _warmupGateway({bool silent = false}) async {
+    if (!silent && mounted) {
+      setState(() {
+        _gatewayStatus = 'Menyambungkan gateway...';
+      });
+    }
+
+    final result = await ApiService.prewarmGateway();
+    if (!mounted) return;
+
+    setState(() {
+      _gatewayHealthy = result['ok'] == true;
+      _gatewayStatus = result['ok'] == true
+          ? 'Gateway online'
+          : (result['msg']?.toString() ?? 'Gateway belum tersambung');
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final sessionProvider = Provider.of<SessionProvider>(context);
@@ -94,9 +134,30 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             const Text('DAM Access Control'),
             if (user != null)
-              Text(
-                '${user.nama} (${_resolveRole(role)})',
-                style: Theme.of(context).textTheme.bodySmall,
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${user.nama} (${_resolveRole(role)})',
+                      style: Theme.of(context).textTheme.bodySmall,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    Icons.circle,
+                    size: 10,
+                    color: _gatewayHealthy ? Colors.green : Colors.orange,
+                  ),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      _gatewayStatus,
+                      style: Theme.of(context).textTheme.bodySmall,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
               ),
           ],
         ),

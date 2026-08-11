@@ -248,6 +248,12 @@ function doPost(e) {
       case 'getGateRequestStatus':
         result = getGateRequestStatus(payload.requestId);
         break;
+      case 'pingAndroidGateway':
+        result = pingAndroidGateway(payload);
+        break;
+      case 'logAndroidDiagnostics':
+        result = logAndroidDiagnostics(payload);
+        break;
       case 'bindKartu':
         result = bindKartu(payload.noKartuMK, payload.nik, payload.loker, payload.lat, payload.lng);
         break;

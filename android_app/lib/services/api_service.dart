@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import '../config/api_config.dart';
+import 'android_diagnostics_service.dart';
 
 class ApiService {
   static const Duration _requestTimeout = Duration(seconds: 25);
   static const List<int> _retryDelaysMs = <int>[350, 900, 1800];
+  static const int _diagnosticBatchLimit = 20;
   static const Set<String> _nonIdempotentActions = <String>{
     'bindKartu',
     'releaseKartu',
@@ -14,8 +16,12 @@ class ApiService {
     'deleteJadwalShift',
     'bulkSaveJadwalShift',
   };
+  static const Set<String> _telemetryInternalActions = <String>{
+    'logAndroidDiagnostics',
+  };
   static final Uri _baseUri = Uri.parse(ApiConfig.baseUrl);
   static HttpClient? _sharedClient;
+  static bool _diagnosticsFlushInFlight = false;
 
   /// Sends a POST request to the Google Apps Script doPost endpoint.
   ///
@@ -23,15 +29,28 @@ class ApiService {
   /// `script.googleusercontent.com` URL that must be fetched with GET. Reposting
   /// the JSON body to that redirect target causes HTTP 405.
   static Future<Map<String, dynamic>> post(
-      String action, Map<String, dynamic> payload) async {
+    String action,
+    Map<String, dynamic> payload, {
+    bool trackDiagnostics = true,
+    bool allowFlush = true,
+  }) async {
     Map<String, dynamic>? lastFailure;
     final allowAutomaticRetry = !_nonIdempotentActions.contains(action);
+    final startedAt = DateTime.now();
 
     for (int attempt = 0; attempt < _retryDelaysMs.length; attempt++) {
       try {
         final result =
             await _postInternal(action, payload).timeout(_requestTimeout);
         if (result['ok'] == true) {
+          _afterRequest(
+            action: action,
+            payload: payload,
+            result: result,
+            startedAt: startedAt,
+            trackDiagnostics: trackDiagnostics,
+            allowFlush: allowFlush,
+          );
           return result;
         }
 
@@ -39,7 +58,16 @@ class ApiService {
         if (!allowAutomaticRetry ||
             !_shouldRetryResult(result) ||
             attempt == _retryDelaysMs.length - 1) {
-          return _massageFailure(result);
+          final failure = _massageFailure(result);
+          _afterRequest(
+            action: action,
+            payload: payload,
+            result: failure,
+            startedAt: startedAt,
+            trackDiagnostics: trackDiagnostics,
+            allowFlush: allowFlush,
+          );
+          return failure;
         }
       } on TimeoutException {
         lastFailure = {
@@ -49,7 +77,16 @@ class ApiService {
           'failureKind': 'timeout',
         };
         if (!allowAutomaticRetry || attempt == _retryDelaysMs.length - 1) {
-          return _massageFailure(lastFailure);
+          final failure = _massageFailure(lastFailure);
+          _afterRequest(
+            action: action,
+            payload: payload,
+            result: failure,
+            startedAt: startedAt,
+            trackDiagnostics: trackDiagnostics,
+            allowFlush: allowFlush,
+          );
+          return failure;
         }
       } on SocketException catch (e) {
         lastFailure = {
@@ -58,7 +95,16 @@ class ApiService {
           'failureKind': _detectSocketFailureKind(e.message),
         };
         if (!allowAutomaticRetry || attempt == _retryDelaysMs.length - 1) {
-          return _massageFailure(lastFailure);
+          final failure = _massageFailure(lastFailure);
+          _afterRequest(
+            action: action,
+            payload: payload,
+            result: failure,
+            startedAt: startedAt,
+            trackDiagnostics: trackDiagnostics,
+            allowFlush: allowFlush,
+          );
+          return failure;
         }
       } on HandshakeException catch (_) {
         lastFailure = {
@@ -67,7 +113,16 @@ class ApiService {
           'failureKind': 'handshake',
         };
         if (!allowAutomaticRetry || attempt == _retryDelaysMs.length - 1) {
-          return _massageFailure(lastFailure);
+          final failure = _massageFailure(lastFailure);
+          _afterRequest(
+            action: action,
+            payload: payload,
+            result: failure,
+            startedAt: startedAt,
+            trackDiagnostics: trackDiagnostics,
+            allowFlush: allowFlush,
+          );
+          return failure;
         }
       } on HttpException catch (e) {
         lastFailure = {
@@ -76,7 +131,16 @@ class ApiService {
           'failureKind': 'http',
         };
         if (!allowAutomaticRetry || attempt == _retryDelaysMs.length - 1) {
-          return _massageFailure(lastFailure);
+          final failure = _massageFailure(lastFailure);
+          _afterRequest(
+            action: action,
+            payload: payload,
+            result: failure,
+            startedAt: startedAt,
+            trackDiagnostics: trackDiagnostics,
+            allowFlush: allowFlush,
+          );
+          return failure;
         }
       } catch (e) {
         lastFailure = {
@@ -85,7 +149,16 @@ class ApiService {
           'failureKind': 'network',
         };
         if (!allowAutomaticRetry || attempt == _retryDelaysMs.length - 1) {
-          return _massageFailure(lastFailure);
+          final failure = _massageFailure(lastFailure);
+          _afterRequest(
+            action: action,
+            payload: payload,
+            result: failure,
+            startedAt: startedAt,
+            trackDiagnostics: trackDiagnostics,
+            allowFlush: allowFlush,
+          );
+          return failure;
         }
       }
 
@@ -93,7 +166,16 @@ class ApiService {
           Duration(milliseconds: _retryDelaysMs[attempt]));
     }
 
-    return _massageFailure(lastFailure);
+    final failure = _massageFailure(lastFailure);
+    _afterRequest(
+      action: action,
+      payload: payload,
+      result: failure,
+      startedAt: startedAt,
+      trackDiagnostics: trackDiagnostics,
+      allowFlush: allowFlush,
+    );
+    return failure;
   }
 
   static Future<Map<String, dynamic>> _postInternal(
@@ -302,5 +384,125 @@ class ApiService {
         message.contains('koneksi ke server terputus') ||
         message.contains('server terlalu lama merespons') ||
         message.contains('http exception');
+  }
+
+  static Future<Map<String, dynamic>> prewarmGateway() {
+    return post(
+      'pingAndroidGateway',
+      <String, dynamic>{
+        'clientRequestId':
+            'warmup-${DateTime.now().toUtc().microsecondsSinceEpoch}',
+      },
+    );
+  }
+
+  static void _afterRequest({
+    required String action,
+    required Map<String, dynamic> payload,
+    required Map<String, dynamic> result,
+    required DateTime startedAt,
+    required bool trackDiagnostics,
+    required bool allowFlush,
+  }) {
+    final latencyMs = DateTime.now().difference(startedAt).inMilliseconds;
+
+    if (trackDiagnostics && !_telemetryInternalActions.contains(action)) {
+      unawaited(_recordDiagnostics(
+        action: action,
+        payload: payload,
+        result: result,
+        latencyMs: latencyMs,
+      ));
+    }
+
+    if (allowFlush &&
+        !_telemetryInternalActions.contains(action) &&
+        result['ok'] == true) {
+      unawaited(_flushQueuedDiagnostics());
+    }
+  }
+
+  static Future<void> _recordDiagnostics({
+    required String action,
+    required Map<String, dynamic> payload,
+    required Map<String, dynamic> result,
+    required int latencyMs,
+  }) async {
+    final requestId = (payload['requestId'] ?? '').toString().trim();
+    final payloadSummary = _buildPayloadSummary(action, payload);
+    final failureKind = (result['failureKind'] ?? '').toString().trim();
+    final httpStatus = _extractHttpStatus(result['msg']?.toString() ?? '');
+    final outcome = result['ok'] == true
+        ? 'success'
+        : isConnectivityFailureResult(result)
+            ? 'connectivity_failure'
+            : 'failure';
+
+    await AndroidDiagnosticsService.recordEvent(<String, dynamic>{
+      'source': 'android_api',
+      'action': action,
+      'phase': result['ok'] == true ? 'response' : 'error',
+      'outcome': outcome,
+      'failureKind': failureKind,
+      'requestId': requestId,
+      'httpStatus': httpStatus,
+      'latencyMs': latencyMs,
+      'message': (result['msg'] ?? '').toString(),
+      'nik': (payload['nik'] ?? '').toString(),
+      'role': (payload['role'] ?? '').toString(),
+      'payloadSummary': payloadSummary,
+    });
+  }
+
+  static Map<String, dynamic> _buildPayloadSummary(
+    String action,
+    Map<String, dynamic> payload,
+  ) {
+    return <String, dynamic>{
+      'action': action,
+      if (payload.containsKey('requestId')) 'requestId': payload['requestId'],
+      if (payload.containsKey('nik')) 'nik': payload['nik'],
+      if (payload.containsKey('noKartuMK')) 'noKartuMK': payload['noKartuMK'],
+      if (payload.containsKey('tujuan')) 'tujuan': payload['tujuan'],
+      if (payload.containsKey('forceMode')) 'forceMode': payload['forceMode'],
+      if (payload.containsKey('periodType'))
+        'periodType': payload['periodType'],
+      if (payload.containsKey('periodValue'))
+        'periodValue': payload['periodValue'],
+    };
+  }
+
+  static String _extractHttpStatus(String message) {
+    final match = RegExp(r'http error:\s*(\d+)', caseSensitive: false)
+        .firstMatch(message);
+    return match == null ? '' : (match.group(1) ?? '');
+  }
+
+  static Future<void> _flushQueuedDiagnostics() async {
+    if (_diagnosticsFlushInFlight) return;
+    _diagnosticsFlushInFlight = true;
+
+    try {
+      final batch = await AndroidDiagnosticsService.peekBatch(
+        limit: _diagnosticBatchLimit,
+      );
+      if (batch.isEmpty) return;
+
+      final result = await post(
+        'logAndroidDiagnostics',
+        <String, dynamic>{'events': batch},
+        trackDiagnostics: false,
+        allowFlush: false,
+      );
+      if (result['ok'] == true) {
+        final ids = batch
+            .map((item) => (item['eventId'] ?? '').toString())
+            .where((id) => id.isNotEmpty)
+            .toList();
+        await AndroidDiagnosticsService.ackBatch(ids);
+      }
+    } finally {
+      _diagnosticsFlushInFlight = false;
+    }
   }
 }

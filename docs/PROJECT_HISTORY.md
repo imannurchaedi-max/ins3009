@@ -243,6 +243,29 @@ Android gate masih bisa masuk ke kondisi buruk saat jaringan putus di momen subm
 - Error `kartu sedang diproses` menjadi jauh lebih bisa ditelusuri karena status request disimpan eksplisit di sheet.
 - Arsitektur Android ke GAS berubah dari direct mutation menjadi submit-plus-poll gateway.
 
+## FASE 19: Telemetry Koneksi Android dan Gateway Warmup
+
+**Tanggal**
+2026-08-11
+
+**Kondisi awal**
+Walau request gate sudah dibuat idempotent, masih ada blind spot: saat koneksi HP gagal sebelum response balik, tim belum punya jejak terpusat tentang error apa yang dialami device dan kapan itu terjadi.
+
+**Akar masalah**
+- Kegagalan seperti timeout, DNS, handshake, atau connection reset banyak yang hanya terlihat di layar HP.
+- Jika request bahkan tidak sampai ke backend, tab request ledger saja belum cukup untuk menjelaskan masalah lapangan.
+- Scan pertama setelah app dibuka juga masih menanggung beban cold-start DNS, redirect, dan TLS handshake.
+
+**Solusi**
+- Menambah tab `ANDROID_DIAGNOSTICS` di backend GAS.
+- Android kini menyimpan event diagnostik lokal lalu mengirim batch event itu ke backend saat koneksi sudah kembali sehat.
+- Menambah endpoint `pingAndroidGateway` untuk prewarm koneksi dari `HomeScreen`, sehingga koneksi ke GAS dipanaskan sebelum user mulai scan.
+
+**Dampak**
+- Tim bisa melihat pola gangguan koneksi Android di spreadsheet tanpa menebak-nebak dari screenshot saja.
+- Error yang gagal mencapai backend utama tetap punya jejak saat device berikutnya berhasil online.
+- Scan pertama menjadi lebih stabil karena koneksi ke GAS tidak selalu cold-start tepat saat aksi operasional.
+
 **Akar masalah**
 - `startNativeCameraScanner()` masih stub.
 - `openLiveScanner()` melewati helper permission/policy yang sudah ada.

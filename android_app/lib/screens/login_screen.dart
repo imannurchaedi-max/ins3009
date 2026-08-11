@@ -33,19 +33,32 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final sessionProvider =
         Provider.of<SessionProvider>(context, listen: false);
-    final result = await sessionProvider.login(nik, password);
+    try {
+      final result = await sessionProvider.login(nik, password);
 
-    if (!mounted) return;
-
-    setState(() => _isLoading = false);
-
-    if (result['ok'] == true) {
-      Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
-    } else {
+      if (!mounted) return;
+      if (result['ok'] != true) {
+        setState(() {
+          _errorMsg = result['msg'] ?? 'Gagal login';
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
       setState(() {
-        _errorMsg = result['msg'] ?? 'Gagal login';
+        _errorMsg = 'Login gagal. Silakan coba lagi.';
       });
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
+  }
+
+  @override
+  void dispose() {
+    _nikController.dispose();
+    _passwordController.dispose();
+    super.dispose();
   }
 
   @override

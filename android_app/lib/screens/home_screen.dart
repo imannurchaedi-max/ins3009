@@ -77,9 +77,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final sessionProvider =
         Provider.of<SessionProvider>(context, listen: false);
     await sessionProvider.logout();
-    if (mounted) {
-      Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
-    }
   }
 
   @override

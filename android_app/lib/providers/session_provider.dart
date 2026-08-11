@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,6 +8,7 @@ import '../services/api_service.dart';
 class SessionProvider with ChangeNotifier {
   SessionModel? _session;
   bool _isLoading = true;
+  int _sessionVersion = 0;
 
   SessionModel? get session => _session;
   bool get isLoading => _isLoading;
@@ -22,8 +24,17 @@ class SessionProvider with ChangeNotifier {
 
     if (sessionJson != null) {
       try {
-        _session = SessionModel.fromJson(jsonDecode(sessionJson));
-        await _refreshSessionFromBackend();
+        final restoredSession = SessionModel.fromJson(jsonDecode(sessionJson));
+        final restoreVersion = ++_sessionVersion;
+        _session = restoredSession;
+        _isLoading = false;
+        notifyListeners();
+
+        unawaited(_refreshSessionFromBackend(
+          expectedNik: restoredSession.nik,
+          version: restoreVersion,
+        ));
+        return;
       } catch (e) {
         await _clearSession(prefs: prefs, notify: false);
       }
@@ -59,11 +70,18 @@ class SessionProvider with ChangeNotifier {
     bool notify = true,
   }) async {
     _session = null;
+    _isLoading = false;
     final targetPrefs = prefs ?? await SharedPreferences.getInstance();
     await targetPrefs.remove('user_session');
     if (notify) {
       notifyListeners();
     }
+  }
+
+  bool _isActiveSessionVersion(int version, String expectedNik) {
+    return version == _sessionVersion &&
+        _session != null &&
+        _session!.nik == expectedNik;
   }
 
   bool _isConnectivityFailure(String message) {
@@ -76,14 +94,23 @@ class SessionProvider with ChangeNotifier {
         lower.contains('connection');
   }
 
-  Future<void> _refreshSessionFromBackend() async {
+  Future<void> _refreshSessionFromBackend({
+    required String expectedNik,
+    required int version,
+  }) async {
     final existing = _session;
-    if (existing == null) return;
+    if (existing == null || !_isActiveSessionVersion(version, expectedNik)) {
+      return;
+    }
 
     final result = await ApiService.post('verifySession', {
       'sessionToken': existing.sessionToken,
       'nik': existing.nik,
     });
+
+    if (!_isActiveSessionVersion(version, expectedNik)) {
+      return;
+    }
 
     if (result['ok'] == true && result['karyawan'] is Map<String, dynamic>) {
       _session = _buildSessionFromKaryawan(
@@ -91,6 +118,7 @@ class SessionProvider with ChangeNotifier {
         fallbackNik: existing.nik,
       );
       await _persistSession();
+      notifyListeners();
       return;
     }
 
@@ -99,7 +127,10 @@ class SessionProvider with ChangeNotifier {
       return;
     }
 
-    await _clearSession(notify: false);
+    if (_isActiveSessionVersion(version, expectedNik)) {
+      await _clearSession(notify: false);
+      notifyListeners();
+    }
   }
 
   Future<Map<String, dynamic>> login(String nik, String password) async {
@@ -113,10 +144,12 @@ class SessionProvider with ChangeNotifier {
       // GAS verifyLogin mengembalikan { ok: true, karyawan: { nik, nama, dept, jabatan, role, ... } }
       // BUKAN 'user' dan BUKAN 'sessionToken'
       final karyawanJson = result['karyawan'] as Map<String, dynamic>;
+      _sessionVersion++;
       _session = _buildSessionFromKaryawan(
         karyawanJson,
         fallbackNik: nik,
       );
+      _isLoading = false;
       await _persistSession();
     }
 
@@ -125,6 +158,7 @@ class SessionProvider with ChangeNotifier {
   }
 
   Future<void> logout() async {
+    _sessionVersion++;
     await _clearSession();
   }
 }

@@ -808,6 +808,35 @@ Error "Sistem sedang memproses scan lain" muncul di jam sibuk (06:00–07:00 Shi
 
 ---
 
+## FASE 47: Login Android Tidak Lagi Stuck di Loading Circle
+
+**Tanggal**: 2026-08-11
+
+**Kondisi awal**
+- Sebagian user Android mengalami login yang berhenti di loading circle.
+- Setelah app ditutup lalu dibuka lagi, session ternyata sudah tersimpan dan user langsung masuk.
+- Gejala ini menunjukkan state auth lokal dan perpindahan layar belum sinkron penuh.
+
+**Akar masalah**
+- Restore session saat startup menahan UI sampai verifikasi backend selesai, sehingga splash/loading bisa terasa macet saat koneksi lambat.
+- Alur auth memakai dua mekanisme sekaligus: `SessionProvider` dan `Navigator`, sehingga perpindahan ke halaman home rawan race condition.
+- Spinner tombol login belum dibungkus `try/finally`, jadi exception tak terduga bisa membuat indikator tetap berputar.
+
+**Perbaikan**
+- `SessionProvider` sekarang melakukan restore session secara optimistis: session lokal langsung dipakai, lalu verifikasi backend jalan di background.
+- Ditambahkan version guard agar refresh session lama tidak bisa menimpa hasil login/logout yang lebih baru.
+- Login dan logout Android sekarang kembali ke satu sumber kebenaran, yaitu `AuthWrapper`, tanpa push route manual antar layar auth.
+- Spinner login dibungkus `try/finally` dan controller input dibersihkan lewat `dispose()`.
+
+**Dampak**
+- User yang sudah punya session tidak lagi tertahan lama di loading awal saat app dibuka.
+- Login sukses tidak perlu menunggu tutup-buka aplikasi untuk benar-benar masuk ke dalam app.
+- Risiko stuck di lingkaran loading akibat balapan state auth turun signifikan.
+
+**File**: `android_app/lib/providers/session_provider.dart` · `android_app/lib/screens/login_screen.dart` · `android_app/lib/screens/home_screen.dart`
+
+---
+
 ## FASE 46: Filter Absen Android Auto-Collapse Setelah Data Muncul
 
 **Tanggal**: 2026-08-11

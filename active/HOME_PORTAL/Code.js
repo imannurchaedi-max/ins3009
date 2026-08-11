@@ -300,6 +300,12 @@ function doPost(e) {
       case 'searchKaryawan':
         result = searchKaryawan(payload.query);
         break;
+      case 'getKaryawanByNIK':
+        var karyawan = getKaryawanByNIK(payload.nik);
+        result = karyawan
+          ? { ok: true, karyawan: makeKaryawanPayload(karyawan) }
+          : { ok: false, msg: 'NIK tidak ditemukan: ' + asText(payload.nik).trim() };
+        break;
       default:
         result = { ok: false, msg: 'Action not mapped: ' + action };
     }

@@ -4,7 +4,7 @@ import 'dart:io';
 import '../config/api_config.dart';
 
 class ApiService {
-  static const Duration _requestTimeout = Duration(seconds: 45);
+  static const Duration _requestTimeout = Duration(seconds: 25);
   static const List<int> _retryDelaysMs = <int>[350, 900, 1800];
 
   /// Sends a POST request to the Google Apps Script doPost endpoint.
@@ -12,7 +12,8 @@ class ApiService {
   /// Apps Script `/exec` endpoints accept the initial POST, then redirect to a
   /// `script.googleusercontent.com` URL that must be fetched with GET. Reposting
   /// the JSON body to that redirect target causes HTTP 405.
-  static Future<Map<String, dynamic>> post(String action, Map<String, dynamic> payload) async {
+  static Future<Map<String, dynamic>> post(
+      String action, Map<String, dynamic> payload) async {
     Map<String, dynamic>? lastFailure;
 
     for (int attempt = 0; attempt < _retryDelaysMs.length; attempt++) {
@@ -24,7 +25,8 @@ class ApiService {
         }
 
         lastFailure = result;
-        if (!_shouldRetryResult(result) || attempt == _retryDelaysMs.length - 1) {
+        if (!_shouldRetryResult(result) ||
+            attempt == _retryDelaysMs.length - 1) {
           return _massageFailure(result);
         }
       } on TimeoutException {
@@ -53,24 +55,19 @@ class ApiService {
           return _massageFailure(lastFailure);
         }
       } on HttpException catch (e) {
-        lastFailure = {
-          'ok': false,
-          'msg': 'HTTP Exception: ${e.message}'
-        };
+        lastFailure = {'ok': false, 'msg': 'HTTP Exception: ${e.message}'};
         if (attempt == _retryDelaysMs.length - 1) {
           return _massageFailure(lastFailure);
         }
       } catch (e) {
-        lastFailure = {
-          'ok': false,
-          'msg': 'Network Exception: $e'
-        };
+        lastFailure = {'ok': false, 'msg': 'Network Exception: $e'};
         if (attempt == _retryDelaysMs.length - 1) {
           return _massageFailure(lastFailure);
         }
       }
 
-      await Future<void>.delayed(Duration(milliseconds: _retryDelaysMs[attempt]));
+      await Future<void>.delayed(
+          Duration(milliseconds: _retryDelaysMs[attempt]));
     }
 
     return _massageFailure(lastFailure);
@@ -87,17 +84,16 @@ class ApiService {
       final Map<String, dynamic> requestBody = {
         'apiKey': ApiConfig.apiKey,
         'action': action,
-        ...payload,  // spread all fields at root level
+        ...payload, // spread all fields at root level
       };
 
       final bodyBytes = utf8.encode(jsonEncode(requestBody));
 
-      HttpClientRequest request = await client.postUrl(Uri.parse(ApiConfig.baseUrl));
+      HttpClientRequest request =
+          await client.postUrl(Uri.parse(ApiConfig.baseUrl));
       request.headers.set('Content-Type', 'application/json');
       request.headers.set('Accept', 'application/json');
-      request.headers.set(HttpHeaders.connectionHeader, 'close');
-      request.persistentConnection = false;
-      request.followRedirects = false;  // We handle redirects manually
+      request.followRedirects = false; // We handle redirects manually
       request.add(bodyBytes);
 
       HttpClientResponse response = await request.close();
@@ -126,8 +122,6 @@ class ApiService {
             : await client.getUrl(redirectUri);
         request.followRedirects = false;
         request.headers.set('Accept', 'application/json');
-        request.headers.set(HttpHeaders.connectionHeader, 'close');
-        request.persistentConnection = false;
 
         if (shouldRepeatPost) {
           request.headers.set('Content-Type', 'application/json');
@@ -137,7 +131,7 @@ class ApiService {
         response = await request.close();
         redirectCount++;
       }
-      
+
       // Read response body
       final responseBody = await response.transform(utf8.decoder).join();
 
@@ -151,7 +145,7 @@ class ApiService {
         };
       }
     } finally {
-      client.close(force: true);
+      client.close();
     }
   }
 
@@ -191,7 +185,8 @@ class ApiService {
     if (lower.contains('handshake')) {
       return {
         'ok': false,
-        'msg': 'Koneksi HTTPS gagal. Pastikan sinyal internet stabil lalu coba lagi.'
+        'msg':
+            'Koneksi HTTPS gagal. Pastikan sinyal internet stabil lalu coba lagi.'
       };
     }
 

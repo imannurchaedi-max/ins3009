@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/session_provider.dart';
@@ -22,9 +24,13 @@ class _GateScreenState extends State<GateScreen> {
   Color _statusColor = Colors.grey;
   final TextEditingController _targetNikController = TextEditingController();
   final TextEditingController _lokerController = TextEditingController();
+  Map<String, dynamic>? _targetEmployee;
+  bool _isLookingUpTarget = false;
+  Timer? _targetLookupDebounce;
 
   @override
   void dispose() {
+    _targetLookupDebounce?.cancel();
     _targetNikController.dispose();
     _lokerController.dispose();
     super.dispose();
@@ -38,6 +44,94 @@ class _GateScreenState extends State<GateScreen> {
       default:
         return 'KARYAWAN';
     }
+  }
+
+  Map<String, dynamic> _buildEmployeeFromSession(dynamic user) {
+    return <String, dynamic>{
+      'nik': user?.nik ?? '',
+      'nama': user?.nama ?? '',
+      'dept': user?.departemen ?? '',
+      'jabatan': user?.jabatan ?? '',
+      'role': user?.role ?? '',
+    };
+  }
+
+  void _scheduleTargetNikLookup(
+    String rawNik, {
+    bool immediate = false,
+    bool announce = false,
+  }) {
+    _targetLookupDebounce?.cancel();
+
+    final nik = rawNik.trim();
+    if (nik.isEmpty || nik.length < 8) {
+      setState(() {
+        _targetEmployee = null;
+        _isLookingUpTarget = false;
+      });
+      return;
+    }
+
+    if (immediate) {
+      _lookupTargetEmployee(nik, announce: announce);
+      return;
+    }
+
+    _targetLookupDebounce = Timer(const Duration(milliseconds: 350), () {
+      _lookupTargetEmployee(nik, announce: announce);
+    });
+  }
+
+  Future<void> _lookupTargetEmployee(
+    String nik, {
+    bool announce = false,
+  }) async {
+    final targetNik = nik.trim();
+    if (targetNik.isEmpty) return;
+
+    setState(() {
+      _isLookingUpTarget = true;
+    });
+
+    final result = await ApiService.post('getKaryawanByNIK', {
+      'nik': targetNik,
+    });
+
+    if (!mounted) return;
+    if (_targetNikController.text.trim() != targetNik) return;
+
+    setState(() {
+      _isLookingUpTarget = false;
+      if (result['ok'] == true && result['karyawan'] is Map) {
+        _targetEmployee =
+            Map<String, dynamic>.from(result['karyawan'] as Map<dynamic, dynamic>);
+        if (announce) {
+          _statusMessage =
+              'Target karyawan ditemukan: ${_targetEmployee!['nama'] ?? targetNik}';
+          _statusColor = Colors.green;
+        }
+      } else {
+        _targetEmployee = null;
+        if (announce) {
+          _statusMessage =
+              result['msg']?.toString() ?? 'NIK target tidak ditemukan.';
+          _statusColor = Colors.red;
+        }
+      }
+    });
+  }
+
+  Future<bool> _ensureTargetEmployeeReady(String nik) async {
+    final targetNik = nik.trim();
+    if (targetNik.isEmpty) return false;
+
+    if ((_targetEmployee?['nik'] ?? '').toString().trim() == targetNik) {
+      return true;
+    }
+
+    await _lookupTargetEmployee(targetNik, announce: true);
+    if (!mounted) return false;
+    return (_targetEmployee?['nik'] ?? '').toString().trim() == targetNik;
   }
 
   Future<String?> _openCameraScanner({
@@ -73,9 +167,10 @@ class _GateScreenState extends State<GateScreen> {
 
     setState(() {
       _targetNikController.text = nik;
-      _statusMessage = 'NIK target terisi dari scan kamera: $nik';
-      _statusColor = Colors.green;
+      _statusMessage = 'Memuat data target untuk NIK: $nik';
+      _statusColor = Colors.blue;
     });
+    await _lookupTargetEmployee(nik, announce: true);
   }
 
   Future<void> _lookupCardStatus(
@@ -98,13 +193,23 @@ class _GateScreenState extends State<GateScreen> {
     setState(() {
       _isScanning = false;
       if (result['ok'] == true) {
+        final status = (result['status'] ?? '').toString().toUpperCase();
         _scannedData = <String, dynamic>{
           ...result,
           'noKartuMK': result['noKartuMK'] ?? result['card'] ?? cardCode,
           'scanSource': sourceLabel,
         };
-        _statusMessage = 'Kartu ditemukan lewat $sourceLabel';
-        _statusColor = Colors.green;
+        if (status == 'BOUND') {
+          _statusMessage =
+              'Kartu masih terikat. Untuk proses masuk, gunakan kartu lain.';
+          _statusColor = Colors.orange;
+        } else {
+          final targetName = (_targetEmployee?['nama'] ?? '').toString().trim();
+          _statusMessage = targetName.isNotEmpty
+              ? 'Kartu tersedia untuk $targetName.'
+              : 'Kartu tersedia dan siap dipakai.';
+          _statusColor = Colors.green;
+        }
       } else {
         _statusMessage = result['msg'] ?? 'Kartu tidak terdaftar';
         _statusColor = Colors.red;
@@ -162,6 +267,8 @@ class _GateScreenState extends State<GateScreen> {
     final sessionProvider =
         Provider.of<SessionProvider>(context, listen: false);
     final currentUser = sessionProvider.session;
+    final role = _resolveRole(currentUser?.role);
+    final isAssistRole = role == 'ADMINISTRATOR' || role == 'SECURITY';
     final uid = _scannedData!['noKartuMK'] ?? _scannedData!['card'];
     final targetNik = (_targetNikController.text.trim().isNotEmpty
             ? _targetNikController.text.trim()
@@ -178,6 +285,19 @@ class _GateScreenState extends State<GateScreen> {
       return;
     }
 
+    if (isAssistRole) {
+      final targetReady = await _ensureTargetEmployeeReady(targetNik);
+      if (!mounted) return;
+      if (!targetReady) {
+        setState(() {
+          _statusMessage =
+              'NIK target belum valid. Pilih karyawan yang benar sebelum proses masuk.';
+          _statusColor = Colors.red;
+        });
+        return;
+      }
+    }
+
     if (currentStatus == 'BOUND') {
       setState(() {
         _statusMessage =
@@ -189,7 +309,7 @@ class _GateScreenState extends State<GateScreen> {
 
     setState(() {
       _isScanning = true;
-      _statusMessage = 'Memverifikasi GPS untuk masuk...';
+      _statusMessage = 'Memverifikasi lokasi untuk proses masuk...';
       _statusColor = Colors.blue;
     });
 
@@ -208,13 +328,16 @@ class _GateScreenState extends State<GateScreen> {
       setState(() {
         _isScanning = false;
         if (result['ok'] == true) {
-          _statusMessage =
-              result['msg']?.toString() ?? 'Berhasil masuk pabrik';
+          _statusMessage = result['msg']?.toString() ?? 'Berhasil masuk pabrik';
           _statusColor = Colors.green;
           _scannedData = null;
+          _lokerController.clear();
+          if (isAssistRole) {
+            _targetNikController.clear();
+            _targetEmployee = null;
+          }
         } else {
-          _statusMessage =
-              result['msg']?.toString() ?? 'Gagal masuk pabrik';
+          _statusMessage = result['msg']?.toString() ?? 'Gagal masuk pabrik';
           _statusColor = Colors.red;
         }
       });
@@ -236,7 +359,7 @@ class _GateScreenState extends State<GateScreen> {
 
     setState(() {
       _isScanning = true;
-      _statusMessage = 'Mendapatkan GPS...';
+      _statusMessage = 'Memverifikasi lokasi untuk proses keluar...';
       _statusColor = Colors.blue;
     });
 
@@ -254,11 +377,13 @@ class _GateScreenState extends State<GateScreen> {
       setState(() {
         _isScanning = false;
         if (result['ok'] == true) {
-          _statusMessage = 'Berhasil keluar pabrik';
+          _statusMessage =
+              result['msg']?.toString() ?? 'Berhasil keluar pabrik';
           _statusColor = Colors.green;
           _scannedData = null;
+          _lokerController.clear();
         } else {
-          _statusMessage = result['msg'] ?? 'Gagal keluar';
+          _statusMessage = result['msg']?.toString() ?? 'Gagal keluar';
           _statusColor = Colors.red;
         }
       });
@@ -282,10 +407,17 @@ class _GateScreenState extends State<GateScreen> {
         currentUser != null &&
         _targetNikController.text != currentUser.nik) {
       _targetNikController.text = currentUser.nik;
+      _targetEmployee = _buildEmployeeFromSession(currentUser);
+    }
+    if (!isAssistRole && currentUser != null) {
+      _targetEmployee = _buildEmployeeFromSession(currentUser);
     }
 
     final scannedStatus =
         (_scannedData?['status'] ?? '').toString().toUpperCase();
+    final hasResolvedTarget = _targetNikController.text.trim().isNotEmpty &&
+        (_targetEmployee?['nik'] ?? '').toString().trim() ==
+            _targetNikController.text.trim();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),
@@ -306,6 +438,9 @@ class _GateScreenState extends State<GateScreen> {
             controller: _targetNikController,
             readOnly: !isAssistRole,
             keyboardType: TextInputType.number,
+            onChanged: isAssistRole
+                ? (String value) => _scheduleTargetNikLookup(value)
+                : null,
             decoration: InputDecoration(
               labelText: isAssistRole ? 'NIK Karyawan Target' : 'NIK Login',
               helperText: isAssistRole
@@ -322,6 +457,35 @@ class _GateScreenState extends State<GateScreen> {
                   : null,
             ),
           ),
+          if (_isLookingUpTarget) ...<Widget>[
+            const SizedBox(height: 8),
+            const LinearProgressIndicator(minHeight: 3),
+          ],
+          if (_targetEmployee != null) ...<Widget>[
+            const SizedBox(height: 12),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    const Text(
+                      'Target karyawan',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${_targetEmployee!['nama'] ?? '-'}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    Text('NIK: ${_targetEmployee!['nik'] ?? '-'}'),
+                    Text('Dept: ${_targetEmployee!['dept'] ?? '-'}'),
+                    Text('Jabatan: ${_targetEmployee!['jabatan'] ?? '-'}'),
+                  ],
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           TextField(
             controller: _lokerController,
@@ -404,11 +568,19 @@ class _GateScreenState extends State<GateScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Nama: ${_scannedData!['nama'] ?? '-'}',
+                      'Nama: ${scannedStatus == 'BOUND' ? (_scannedData!['nama'] ?? '-') : '-'}',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    Text('Dept: ${_scannedData!['dept'] ?? '-'}'),
+                    Text(
+                      'Dept: ${scannedStatus == 'BOUND' ? (_scannedData!['dept'] ?? '-') : '-'}',
+                    ),
                     Text('Status: ${_scannedData!['status'] ?? '-'}'),
+                    if (scannedStatus == 'FREE' &&
+                        (_scannedData!['waktuRelease'] ?? '')
+                            .toString()
+                            .trim()
+                            .isNotEmpty)
+                      Text('Terakhir release: ${_scannedData!['waktuRelease']}'),
                   ],
                 ),
               ),
@@ -419,7 +591,10 @@ class _GateScreenState extends State<GateScreen> {
               children: <Widget>[
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: (_isScanning || scannedStatus == 'BOUND')
+                    onPressed: (_isScanning ||
+                            _isLookingUpTarget ||
+                            scannedStatus == 'BOUND' ||
+                            !hasResolvedTarget)
                         ? null
                         : _prosesMasuk,
                     icon: const Icon(Icons.login),

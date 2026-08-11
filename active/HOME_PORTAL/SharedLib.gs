@@ -1089,7 +1089,10 @@ function withDocumentLock(work) {
   const LOCK_WAIT_MS = 30000;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const lock = LockService.getScriptLock();
+    // Prioritaskan document lock agar operasi sheet berat tidak
+    // memblokir withCardLock(), yang memakai script lock singkat
+    // untuk semaphore per-kartu.
+    const lock = LockService.getDocumentLock() || LockService.getScriptLock();
     if (lock.tryLock(LOCK_WAIT_MS)) {
       try {
         return work();

@@ -13,11 +13,13 @@ class _LoginScreenState extends State<LoginScreen> {
   final _nikController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _obscurePassword = true;
   String? _errorMsg;
 
   Future<void> _handleLogin() async {
     final nik = _nikController.text.trim();
-    final password = _passwordController.text; // Boleh kosong (MK tidak punya password)
+    final password =
+        _passwordController.text; // Boleh kosong (MK tidak punya password)
 
     if (nik.isEmpty) {
       setState(() => _errorMsg = 'NIK harus diisi');
@@ -29,7 +31,8 @@ class _LoginScreenState extends State<LoginScreen> {
       _errorMsg = null;
     });
 
-    final sessionProvider = Provider.of<SessionProvider>(context, listen: false);
+    final sessionProvider =
+        Provider.of<SessionProvider>(context, listen: false);
     final result = await sessionProvider.login(nik, password);
 
     if (!mounted) return;
@@ -37,8 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = false);
 
     if (result['ok'] == true) {
-      // Navigasi sudah ditangani oleh AuthWrapper di main.dart
-      // Cukup notifyListeners dari SessionProvider yang membuat AuthWrapper rebuild
+      Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
     } else {
       setState(() {
         _errorMsg = result['msg'] ?? 'Gagal login';
@@ -89,12 +91,27 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 16),
                 TextField(
                   controller: _passwordController,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Password (kosongkan jika tidak ada)',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.lock),
+                    border: const OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.lock),
+                    suffixIcon: IconButton(
+                      onPressed: () {
+                        setState(() {
+                          _obscurePassword = !_obscurePassword;
+                        });
+                      },
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                      ),
+                      tooltip: _obscurePassword
+                          ? 'Tampilkan password'
+                          : 'Sembunyikan password',
+                    ),
                   ),
-                  obscureText: true,
+                  obscureText: _obscurePassword,
                   onSubmitted: (_) => _handleLogin(),
                 ),
                 const SizedBox(height: 8),
@@ -103,7 +120,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     padding: const EdgeInsets.only(bottom: 8),
                     child: Text(
                       _errorMsg!,
-                      style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                          color: Colors.red, fontWeight: FontWeight.bold),
                     ),
                   ),
                 const SizedBox(height: 16),

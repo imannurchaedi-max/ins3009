@@ -15,6 +15,7 @@ class _AreaScreenState extends State<AreaScreen> {
   bool _isScanning = false;
   bool _isLoadingLogs = false;
   bool _logLoadedOnce = false;
+  bool _logsNeedRefresh = false;
   String _viewMode = 'scan';
   String _statusMessage =
       'Scan barcode/QR kartu MK dengan kamera. NFC tetap tersedia bila kartu mendukung.';
@@ -79,7 +80,12 @@ class _AreaScreenState extends State<AreaScreen> {
       }
     });
 
-    await _loadRecentLogs();
+    if (result['ok'] == true) {
+      _logsNeedRefresh = true;
+      if (_viewMode == 'log') {
+        await _loadRecentLogs();
+      }
+    }
   }
 
   Future<void> _scanAreaWithCamera() async {
@@ -142,6 +148,7 @@ class _AreaScreenState extends State<AreaScreen> {
       _logLoadedOnce = true;
       if (result['ok'] == true) {
         _recentLogs = (result['data'] as List?) ?? <dynamic>[];
+        _logsNeedRefresh = false;
       } else {
         _logError = result['msg'] ?? 'Gagal memuat log area';
       }
@@ -150,7 +157,7 @@ class _AreaScreenState extends State<AreaScreen> {
 
   void _switchView(String value) {
     setState(() => _viewMode = value);
-    if (value == 'log' && !_logLoadedOnce) {
+    if (value == 'log' && (!_logLoadedOnce || _logsNeedRefresh)) {
       _loadRecentLogs();
     }
   }

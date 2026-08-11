@@ -158,31 +158,67 @@ function rebuildRecapAbsenInOutMK() {
 }
 
 // ── Binding Status ────────────────────────────────────────
+function buildBindingSnapshotFromRow_(row, rowNumber) {
+  const waktuBind = parseSheetDateTime(row[5]);
+  const waktuRelease = parseSheetDateTime(row[7]);
+  const waktuReleaseText = waktuRelease
+    ? formatDateTime(waktuRelease)
+    : asText(row[7]);
+  const hasRelease = Boolean(asText(waktuReleaseText).trim());
+  const snapshot = {
+    ok: true,
+    noKartuMK: normalizeCard(row[0]),
+    nik: asText(row[1]),
+    nama: asText(row[2]),
+    dept: asText(row[3]),
+    jabatan: asText(row[4]),
+    waktuBind: waktuBind ? formatDateTime(waktuBind) : asText(row[5]),
+    status: hasRelease ? 'FREE' : 'BOUND',
+    storedStatus: asText(row[6]).trim().toUpperCase(),
+    waktuRelease: waktuReleaseText,
+    row: rowNumber
+  };
+
+  if (snapshot.status !== 'BOUND') {
+    snapshot.nik = '';
+    snapshot.nama = '';
+    snapshot.dept = '';
+    snapshot.jabatan = '';
+  }
+
+  return snapshot;
+}
+
+function findOpenBindingSnapshotByNik_(nik, data) {
+  const targetNik = asText(nik).trim();
+  if (!targetNik) return null;
+
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (asText(data[i][1]).trim() !== targetNik) continue;
+    const snapshot = buildBindingSnapshotFromRow_(data[i], i + 1);
+    if (snapshot.status === 'BOUND') return snapshot;
+  }
+
+  return null;
+}
+
 function getBindingStatus(noKartuMK) {
   try {
     const sheet = getSheet(SHEET_BINDING);
     const data  = sheet.getDataRange().getValues();
     const no    = assertCard(noKartuMK);
+    let latestReleased = null;
 
     for (let i = data.length - 1; i >= 1; i--) {
       if (normalizeCard(data[i][0]) === no) {
-        const waktuBind = parseSheetDateTime(data[i][5]);
-        const waktuRelease = parseSheetDateTime(data[i][7]);
-        return {
-          ok: true,
-          noKartuMK: normalizeCard(data[i][0]),
-          nik:         asText(data[i][1]),
-          nama:        asText(data[i][2]),
-          dept:        asText(data[i][3]),
-          jabatan:     asText(data[i][4]),
-          waktuBind:   waktuBind ? formatDateTime(waktuBind) : asText(data[i][5]),
-          status:      asText(data[i][6]) || 'FREE',
-          waktuRelease:waktuRelease ? formatDateTime(waktuRelease) : asText(data[i][7]),
-          row:         i + 1
-        };
+        const snapshot = buildBindingSnapshotFromRow_(data[i], i + 1);
+        if (snapshot.status === 'BOUND') return snapshot;
+        if (!latestReleased) latestReleased = snapshot;
       }
     }
-    return { ok: true, status: 'FREE', noKartuMK: no };
+
+    if (latestReleased) return latestReleased;
+    return { ok: true, status: 'FREE', noKartuMK: no, nik: '', nama: '', dept: '', jabatan: '', waktuBind: '', waktuRelease: '' };
   } catch(e) {
     return { ok: false, msg: e.message };
   }
@@ -283,18 +319,17 @@ function bindKartu(noKartuMK, nik, loker, userLat, userLng) {
       // Cek NIK sudah terikat di kartu lain
       var sheetB = getSheet(SHEET_BINDING);
       var dataB  = sheetB.getDataRange().getValues();
-      for (var i = 1; i < dataB.length; i++) {
-        if (asText(dataB[i][1]).trim() === asText(nik).trim() && asText(dataB[i][6]) === 'BOUND') {
-          var oldKartu = asText(dataB[i][0]);
-          return {
-            ok: false, msg: `NIK ${nik} sudah terikat di kartu ${oldKartu}.`,
-            htmlMsg: `❌ NIK <strong>${escHtml(nik)}</strong> masih terikat di kartu <strong>${escHtml(oldKartu)}</strong>.<br>
-                      <div style="margin-top:8px;padding:8px;background:rgba(255,255,255,0.7);border-radius:4px;color:#333;font-size:13px;border-left:3px solid #dc3545;">
-                        Harap ke Security untuk lepas binding kartu lama.
-                      </div>`,
-            requiresSecurityRelease: true, boundCardNo: oldKartu
-          };
-        }
+      var existingNikBinding = findOpenBindingSnapshotByNik_(nik, dataB);
+      if (existingNikBinding) {
+        var oldKartu = existingNikBinding.noKartuMK;
+        return {
+          ok: false, msg: `NIK ${nik} sudah terikat di kartu ${oldKartu}.`,
+          htmlMsg: `❌ NIK <strong>${escHtml(nik)}</strong> masih terikat di kartu <strong>${escHtml(oldKartu)}</strong>.<br>
+                    <div style="margin-top:8px;padding:8px;background:rgba(255,255,255,0.7);border-radius:4px;color:#333;font-size:13px;border-left:3px solid #dc3545;">
+                      Harap ke Security untuk lepas binding kartu lama.
+                    </div>`,
+          requiresSecurityRelease: true, boundCardNo: oldKartu
+        };
       }
 
       // ── TULIS: binding + log masuk (kedua appendRow aman concurrent per Google API) ──

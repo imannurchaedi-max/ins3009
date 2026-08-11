@@ -78,7 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
         Provider.of<SessionProvider>(context, listen: false);
     await sessionProvider.logout();
     if (mounted) {
-      Navigator.pushReplacementNamed(context, '/login');
+      Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
     }
   }
 
@@ -111,7 +111,10 @@ class _HomeScreenState extends State<HomeScreen> {
           )
         ],
       ),
-      body: tabs[safeIndex].page,
+      body: IndexedStack(
+        index: safeIndex,
+        children: tabs.map((tab) => tab.page).toList(),
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: safeIndex,
         onTap: (index) => setState(() => _currentIndex = index),

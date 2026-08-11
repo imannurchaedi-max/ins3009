@@ -45,19 +45,56 @@ class _CameraScanScreenState extends State<CameraScanScreen> {
     super.dispose();
   }
 
-  Future<void> _handleDetection(BarcodeCapture capture) async {
-    if (_handled) return;
+  String? _pickBestValue(BarcodeCapture capture) {
+    final values = <String>[];
 
     for (final Barcode barcode in capture.barcodes) {
       final rawValue = barcode.rawValue?.trim();
-      if (rawValue == null || rawValue.isEmpty) continue;
+      final displayValue = barcode.displayValue?.trim();
 
-      _handled = true;
-      await _controller.stop();
-      if (!mounted) return;
-      Navigator.of(context).pop(rawValue);
-      return;
+      if (rawValue != null && rawValue.isNotEmpty && !values.contains(rawValue)) {
+        values.add(rawValue);
+      }
+      if (displayValue != null &&
+          displayValue.isNotEmpty &&
+          !values.contains(displayValue)) {
+        values.add(displayValue);
+      }
     }
+
+    if (values.isEmpty) return null;
+
+    values.sort((String a, String b) {
+      final scoreA = _scoreDetectedValue(a);
+      final scoreB = _scoreDetectedValue(b);
+      if (scoreA != scoreB) return scoreB.compareTo(scoreA);
+      return b.length.compareTo(a.length);
+    });
+
+    return values.first;
+  }
+
+  int _scoreDetectedValue(String value) {
+    final normalized = value.trim().toUpperCase();
+    if (RegExp(r'^MK[\s:_-]*\d{3,}$').hasMatch(normalized)) return 4;
+    if (RegExp(r'^\d{6}$').hasMatch(normalized) && normalized.startsWith('1')) {
+      return 3;
+    }
+    if (RegExp(r'^\d{3,12}$').hasMatch(normalized)) return 2;
+    if (RegExp(r'^[A-Z0-9:_-]{3,32}$').hasMatch(normalized)) return 1;
+    return 0;
+  }
+
+  Future<void> _handleDetection(BarcodeCapture capture) async {
+    if (_handled) return;
+
+    final detectedValue = _pickBestValue(capture);
+    if (detectedValue == null || detectedValue.isEmpty) return;
+
+    _handled = true;
+    await _controller.stop();
+    if (!mounted) return;
+    Navigator.of(context).pop(detectedValue);
   }
 
   Future<void> _toggleTorch() async {

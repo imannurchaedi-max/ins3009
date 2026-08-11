@@ -41,6 +41,7 @@ Jangan gunakan path berikut sebagai source of truth arsitektur aktif:
 - Inspect dependencies before editing.
 - Prefer the smallest safe change.
 - Update `/docs` when runtime behavior, bridge behavior, or maintenance flow changes.
+- End each completed work cycle with a git commit so the repository state stays current with the implemented result.
 - After modifying runtime code under `active/`, run `npm run deploy` unless explicitly told not to.
 - Use Python or Node tooling from `scripts/` only when you are auditing, deploying, comparing, or generating reports.
 - Do not delete files without confirmation unless the user explicitly asks for cleanup.

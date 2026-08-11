@@ -26,6 +26,7 @@ Modul-modul itu bukan referensi utama arsitektur; cek hanya bila perubahan meman
 - Never delete files without confirmation, kecuali user sudah eksplisit meminta cleanup.
 - Always inspect dependencies before editing.
 - Prefer small, safe commits.
+- Always end a completed task with a git commit so the repository remains up to date with the latest validated work.
 - Default read focus is `active/`, `docs/`, and `android_app/lib/`.
 - Treat `scripts/` as operational tooling only. Open or inspect it only when executing Python/Node automation, deploy flow, audit flow, or when a skill explicitly needs it.
 - Exclude these folders from routine reading unless explicitly needed: `Junk/`, `reports/`, `graphify-out/`, `node_modules/`, `venv/`, `skills/`, `_local/`.

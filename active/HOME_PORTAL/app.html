@@ -1801,12 +1801,16 @@ function getIsoWeekValue(date) {
   return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
 
-function processAbsenReport() {
+function processAbsenReport(pageOverride) {
   const nik = normalizeSerial(document.getElementById('cek-absen-nik').value);
   const periodType = document.getElementById('cek-absen-period-type').value;
   const periodValue = document.getElementById('cek-absen-period-value').value;
+  const search = (document.getElementById('cek-absen-search') || {}).value || '';
+  const sort = (document.getElementById('cek-absen-sort') || {}).value || 'tanggal_desc';
   const list = document.getElementById('cek-absen-list');
   const exportBtn = document.getElementById('cek-absen-export');
+  const page = Math.max(1, parseInt(pageOverride, 10) || 1);
+  const pageSize = 25;
 
   REPORT_CACHE.absen = null;
   if (exportBtn) exportBtn.disabled = true;
@@ -1836,7 +1840,53 @@ function processAbsenReport() {
       window.clearTimeout(slowTimer);
       renderAbsenReport(res);
     })
-    .getAbsenReport(nik, deptFilter, periodType, periodValue);
+    .getAbsenReport(nik, deptFilter, periodType, periodValue, page, pageSize, search, sort);
+}
+
+function buildAbsenPaginationControls(currentPage, totalPages) {
+  if (!totalPages || totalPages <= 1) return '';
+
+  const pages = [];
+  function addPage(page) {
+    if (page >= 1 && page <= totalPages && pages.indexOf(page) === -1) pages.push(page);
+  }
+
+  addPage(1);
+  addPage(totalPages);
+  for (let page = currentPage - 1; page <= currentPage + 1; page++) addPage(page);
+  if (currentPage <= 3) {
+    addPage(2);
+    addPage(3);
+    addPage(4);
+  }
+  if (currentPage >= totalPages - 2) {
+    addPage(totalPages - 1);
+    addPage(totalPages - 2);
+    addPage(totalPages - 3);
+  }
+
+  pages.sort(function(a, b) { return a - b; });
+
+  const parts = [
+    `<button type="button" class="pg-btn" data-action="change-absen-page" data-page="${currentPage - 1}" ${currentPage <= 1 ? 'disabled' : ''}>Prev</button>`
+  ];
+
+  let previousPage = 0;
+  pages.forEach(function(page) {
+    if (previousPage && page - previousPage > 1) {
+      parts.push('<button type="button" class="pg-btn" disabled>...</button>');
+    }
+    parts.push(
+      `<button type="button" class="pg-btn ${page === currentPage ? 'pg-active' : ''}" data-action="change-absen-page" data-page="${page}" ${page === currentPage ? 'disabled' : ''}>${page}</button>`
+    );
+    previousPage = page;
+  });
+
+  parts.push(
+    `<button type="button" class="pg-btn" data-action="change-absen-page" data-page="${currentPage + 1}" ${currentPage >= totalPages ? 'disabled' : ''}>Next</button>`
+  );
+
+  return parts.join('');
 }
 
 function renderAbsenReport(res) {
@@ -1852,9 +1902,23 @@ function renderAbsenReport(res) {
   REPORT_CACHE.absen = res;
   if (exportBtn) exportBtn.disabled = !res.data.length;
   showResult('cek-absen', 'success', `Periode ${escHtml(res.period)} - ${res.total} catatan`);
-  
+
   const role = STATE.currentUser ? STATE.currentUser.role : 'KARYAWAN';
   const isKaryawan = role === 'KARYAWAN' || role === 'Karyawan';
+  const currentPage = Math.max(1, parseInt(res.page, 10) || 1);
+  const totalPages = Math.max(1, parseInt(res.totalPages, 10) || 1);
+  const startRow = Math.max(0, parseInt(res.startRow, 10) || 0);
+  const endRow = Math.max(0, parseInt(res.endRow, 10) || 0);
+  const paginationControls = buildAbsenPaginationControls(currentPage, totalPages);
+  const paginationSummary = res.total
+    ? `Menampilkan ${startRow}-${endRow} dari ${res.total} catatan`
+    : 'Tidak ada catatan pada periode ini';
+  const paginationHtml = `
+    <div class="pagination-bar">
+      <div class="small text-muted">${escHtml(paginationSummary)}</div>
+      ${paginationControls ? `<div class="pagination-controls">${paginationControls}</div>` : ''}
+    </div>
+  `;
   
   let tableHeader = '';
   if (isKaryawan) {
@@ -1898,6 +1962,7 @@ function renderAbsenReport(res) {
       <div class="summary-box"><strong>${res.complete}</strong><span>Selesai</span></div>
       <div class="summary-box"><strong>${res.active}</strong><span>Aktif</span></div>
     </div>
+    ${paginationHtml}
     <div class="table-responsive mt-3">
       <table class="table table-bordered table-striped table-hover align-middle">
         <thead class="table-dark">
@@ -1908,40 +1973,43 @@ function renderAbsenReport(res) {
         </tbody>
       </table>
     </div>
+    ${paginationHtml}
   `;
 }
 
 function exportAbsenReport() {
   const report = REPORT_CACHE.absen;
-  if (!report || !report.data || !report.data.length) {
+  if (!report || !report.total) {
     showResult('cek-absen', 'error', 'Tidak ada data absen untuk diexport. Klik PROSES terlebih dahulu.');
     return;
   }
-
-  const rows = [
-    ['PERIODE', report.period],
-    ['TOTAL', report.total],
-    [],
-    ['TANGGAL', 'NIK', 'NAMA', 'DEPARTEMEN', 'JABATAN', 'JAM MASUK', 'JAM KELUAR', 'STATUS']
-  ];
-
-  report.data.forEach(row => {
-    rows.push([
-      row.tanggal || '',
-      row.nik || '',
-      row.nama || '',
-      row.dept || '',
-      row.jabatan || '',
-      row.jamMasuk || '',
-      row.jamKeluar || '',
-      row.status || ''
-    ]);
-  });
-
-  const csv = rows.map(row => row.map(csvCell).join(',')).join('\r\n');
-  const nik = normalizeSerial(document.getElementById('cek-absen-nik').value) || 'NIK';
+  const rawNik = normalizeSerial(document.getElementById('cek-absen-nik').value);
+  const filenameNik = rawNik || 'SEMUA';
+  const role = STATE.currentUser ? STATE.currentUser.role : '';
+  const deptFilter = role === 'PENGAWAS'
+    ? (STATE.currentUser && STATE.currentUser.dept ? STATE.currentUser.dept : '')
+    : '';
+  const periodType = document.getElementById('cek-absen-period-type').value;
   const periodValue = document.getElementById('cek-absen-period-value').value || 'PERIODE';
-  downloadTextFile(`absen_${nik}_${periodValue}.csv`, '\ufeff' + csv, 'text/csv;charset=utf-8');
+
+  showResult('cek-absen', 'warning', 'Menyiapkan CSV full periode...');
+  google.script.run
+    .withFailureHandler(err => {
+      handleGasFailure('cek-absen', err);
+    })
+    .withSuccessHandler(res => {
+      if (!res || !res.ok) {
+        showResult('cek-absen', 'error', escHtml((res && res.msg) || 'Gagal menyiapkan CSV.'));
+        return;
+      }
+      downloadTextFile(
+        res.filename || `absen_${filenameNik}_${periodValue}.csv`,
+        res.csv || '',
+        'text/csv;charset=utf-8'
+      );
+      showResult('cek-absen', 'success', `CSV berhasil disiapkan untuk periode ${escHtml(res.period || report.period || periodValue)}.`);
+    })
+    .exportAbsenReportCsv(rawNik, deptFilter, periodType, periodValue);
 }
 
 function csvCell(value) {

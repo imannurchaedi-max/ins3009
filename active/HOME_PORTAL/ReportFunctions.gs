@@ -68,7 +68,10 @@ function buildTimeSortKey(rawValue, displayedValue) {
 }
 
 function buildPaginationMeta_(totalRows, page, pageSize) {
-  const safePageSize = Math.max(10, Math.min(parseInt(pageSize, 10) || DEFAULT_REPORT_PAGE_SIZE, MAX_REPORT_PAGE_SIZE));
+  const rawPageSize = asText(pageSize).trim().toUpperCase();
+  const safePageSize = rawPageSize === 'ALL'
+    ? Math.max(1, totalRows || 1)
+    : Math.max(10, Math.min(parseInt(pageSize, 10) || DEFAULT_REPORT_PAGE_SIZE, MAX_REPORT_PAGE_SIZE));
   const totalPages = Math.max(1, Math.ceil(totalRows / safePageSize) || 1);
   const currentPage = Math.min(totalPages, Math.max(1, parseInt(page, 10) || 1));
   const startIndex = (currentPage - 1) * safePageSize;

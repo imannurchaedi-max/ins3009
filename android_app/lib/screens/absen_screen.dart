@@ -13,6 +13,7 @@ class AbsenScreen extends StatefulWidget {
 
 class _AbsenScreenState extends State<AbsenScreen> {
   bool _isLoading = true;
+  bool _isFilterCollapsed = false;
   List<dynamic> _absenData = <dynamic>[];
   String? _errorMessage;
   String _periodType = 'week';
@@ -34,7 +35,7 @@ class _AbsenScreenState extends State<AbsenScreen> {
       final session =
           Provider.of<SessionProvider>(context, listen: false).session;
       _hydrateDefaultFilters(session);
-      _fetchAbsenData();
+      _fetchAbsenData(collapseOnSuccess: true);
     });
   }
 
@@ -86,7 +87,25 @@ class _AbsenScreenState extends State<AbsenScreen> {
     setState(() => _selectedDate = picked);
   }
 
-  Future<void> _fetchAbsenData({int? page}) async {
+  String _currentSortLabel() {
+    switch (_sort) {
+      case 'tanggal_asc':
+        return 'Tanggal terlama';
+      case 'nama_asc':
+        return 'Nama A-Z';
+      case 'nama_desc':
+        return 'Nama Z-A';
+      case 'jam_masuk_asc':
+        return 'Jam masuk tercepat';
+      case 'jam_masuk_desc':
+        return 'Jam masuk terlambat';
+      case 'tanggal_desc':
+      default:
+        return 'Tanggal terbaru';
+    }
+  }
+
+  Future<void> _fetchAbsenData({int? page, bool collapseOnSuccess = false}) async {
     final sessionProvider =
         Provider.of<SessionProvider>(context, listen: false);
     final user = sessionProvider.session;
@@ -123,8 +142,15 @@ class _AbsenScreenState extends State<AbsenScreen> {
         _currentPage = result['page'] ?? 1;
         _totalPages = result['totalPages'] ?? 1;
         _periodLabel = result['period']?.toString() ?? '';
+        if (collapseOnSuccess && _totalRows > 0) {
+          _isFilterCollapsed = true;
+        }
+        if (_totalRows == 0) {
+          _isFilterCollapsed = false;
+        }
       } else {
         _errorMessage = result['msg'] ?? 'Gagal memuat rekap absen';
+        _isFilterCollapsed = false;
       }
     });
   }
@@ -160,6 +186,13 @@ class _AbsenScreenState extends State<AbsenScreen> {
   Widget _buildFilterCard(String role, SessionModel? user) {
     final isKaryawan = role == 'KARYAWAN';
     final isPengawas = role == 'PENGAWAS';
+    final nikValue = isKaryawan
+        ? (user?.nik ?? '')
+        : _nikController.text.trim();
+    final deptValue = isPengawas
+        ? (user?.departemen ?? '').toUpperCase()
+        : _deptController.text.trim().toUpperCase();
+    final searchValue = _searchController.text.trim();
 
     return Card(
       child: Padding(
@@ -179,151 +212,230 @@ class _AbsenScreenState extends State<AbsenScreen> {
                   icon: const Icon(Icons.refresh),
                   label: const Text('Refresh'),
                 ),
+                IconButton(
+                  onPressed: () {
+                    setState(() => _isFilterCollapsed = !_isFilterCollapsed);
+                  },
+                  tooltip: _isFilterCollapsed ? 'Tampilkan filter' : 'Sembunyikan filter',
+                  icon: Icon(
+                    _isFilterCollapsed ? Icons.expand_more : Icons.expand_less,
+                  ),
+                ),
               ],
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _nikController,
-              readOnly: isKaryawan,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: isKaryawan ? 'NIK Saya' : 'Filter NIK',
-                border: const OutlineInputBorder(),
-                prefixIcon: const Icon(Icons.badge),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _deptController,
-              readOnly: isPengawas,
-              decoration: InputDecoration(
-                labelText: isPengawas
-                    ? 'Departemen Pengawas'
-                    : 'Filter Departemen',
-                border: const OutlineInputBorder(),
-                prefixIcon: const Icon(Icons.apartment),
-                helperText: isPengawas && user != null
-                    ? 'Terkunci ke dept ${user.departemen}'
-                    : null,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _searchController,
-              decoration: const InputDecoration(
-                labelText: 'Cari nama / NIK / departemen',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.search),
-              ),
-              onSubmitted: (_) => _fetchAbsenData(page: 1),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _periodType,
+            AnimatedCrossFade(
+              firstChild: Column(
+                children: <Widget>[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _nikController,
+                    readOnly: isKaryawan,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: isKaryawan ? 'NIK Saya' : 'Filter NIK',
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.badge),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _deptController,
+                    readOnly: isPengawas,
+                    decoration: InputDecoration(
+                      labelText: isPengawas
+                          ? 'Departemen Pengawas'
+                          : 'Filter Departemen',
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.apartment),
+                      helperText: isPengawas && user != null
+                          ? 'Terkunci ke dept ${user.departemen}'
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _searchController,
                     decoration: const InputDecoration(
-                      labelText: 'Periode',
+                      labelText: 'Cari nama / NIK / departemen',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.search),
+                    ),
+                    onSubmitted: (_) => _fetchAbsenData(
+                      page: 1,
+                      collapseOnSuccess: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _periodType,
+                          decoration: const InputDecoration(
+                            labelText: 'Periode',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: const <DropdownMenuItem<String>>[
+                            DropdownMenuItem<String>(
+                              value: 'date',
+                              child: Text('Harian'),
+                            ),
+                            DropdownMenuItem<String>(
+                              value: 'week',
+                              child: Text('Mingguan'),
+                            ),
+                            DropdownMenuItem<String>(
+                              value: 'month',
+                              child: Text('Bulanan'),
+                            ),
+                          ],
+                          onChanged: (String? value) {
+                            if (value == null) return;
+                            setState(() => _periodType = value);
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: InkWell(
+                          onTap: _pickPeriodDate,
+                          borderRadius: BorderRadius.circular(12),
+                          child: InputDecorator(
+                            decoration: const InputDecoration(
+                              labelText: 'Nilai periode',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.event),
+                            ),
+                            child: Text(_formatSelectedPeriod()),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: _sort,
+                    decoration: const InputDecoration(
+                      labelText: 'Urutan data',
                       border: OutlineInputBorder(),
                     ),
                     items: const <DropdownMenuItem<String>>[
                       DropdownMenuItem<String>(
-                        value: 'date',
-                        child: Text('Harian'),
+                        value: 'tanggal_desc',
+                        child: Text('Tanggal terbaru'),
                       ),
                       DropdownMenuItem<String>(
-                        value: 'week',
-                        child: Text('Mingguan'),
+                        value: 'tanggal_asc',
+                        child: Text('Tanggal terlama'),
                       ),
                       DropdownMenuItem<String>(
-                        value: 'month',
-                        child: Text('Bulanan'),
+                        value: 'nama_asc',
+                        child: Text('Nama A-Z'),
+                      ),
+                      DropdownMenuItem<String>(
+                        value: 'nama_desc',
+                        child: Text('Nama Z-A'),
+                      ),
+                      DropdownMenuItem<String>(
+                        value: 'jam_masuk_asc',
+                        child: Text('Jam masuk tercepat'),
+                      ),
+                      DropdownMenuItem<String>(
+                        value: 'jam_masuk_desc',
+                        child: Text('Jam masuk terlambat'),
                       ),
                     ],
                     onChanged: (String? value) {
                       if (value == null) return;
-                      setState(() => _periodType = value);
+                      setState(() => _sort = value);
                     },
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: InkWell(
-                    onTap: _pickPeriodDate,
-                    borderRadius: BorderRadius.circular(12),
-                    child: InputDecorator(
-                      decoration: const InputDecoration(
-                        labelText: 'Nilai periode',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.event),
-                      ),
-                      child: Text(_formatSelectedPeriod()),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _isLoading
+                          ? null
+                          : () => _fetchAbsenData(
+                                page: 1,
+                                collapseOnSuccess: true,
+                              ),
+                      icon: const Icon(Icons.filter_alt),
+                      label: const Text('Terapkan Filter'),
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: _sort,
-              decoration: const InputDecoration(
-                labelText: 'Urutan data',
-                border: OutlineInputBorder(),
+                  if (_periodLabel.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Periode aktif: $_periodLabel',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: Colors.grey[700]),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-              items: const <DropdownMenuItem<String>>[
-                DropdownMenuItem<String>(
-                  value: 'tanggal_desc',
-                  child: Text('Tanggal terbaru'),
+              secondChild: Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF7F9FC),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFD7DEE7)),
                 ),
-                DropdownMenuItem<String>(
-                  value: 'tanggal_asc',
-                  child: Text('Tanggal terlama'),
-                ),
-                DropdownMenuItem<String>(
-                  value: 'nama_asc',
-                  child: Text('Nama A-Z'),
-                ),
-                DropdownMenuItem<String>(
-                  value: 'nama_desc',
-                  child: Text('Nama Z-A'),
-                ),
-                DropdownMenuItem<String>(
-                  value: 'jam_masuk_asc',
-                  child: Text('Jam masuk tercepat'),
-                ),
-                DropdownMenuItem<String>(
-                  value: 'jam_masuk_desc',
-                  child: Text('Jam masuk terlambat'),
-                ),
-              ],
-              onChanged: (String? value) {
-                if (value == null) return;
-                setState(() => _sort = value);
-              },
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _isLoading ? null : () => _fetchAbsenData(page: 1),
-                icon: const Icon(Icons.filter_alt),
-                label: const Text('Terapkan Filter'),
-              ),
-            ),
-            if (_periodLabel.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Periode aktif: $_periodLabel',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: Colors.grey[700]),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      _periodLabel.isNotEmpty
+                          ? 'Periode aktif: $_periodLabel'
+                          : 'Periode aktif: ${_formatSelectedPeriod()}',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: <Widget>[
+                        Chip(
+                          avatar: const Icon(Icons.swap_vert, size: 18),
+                          label: Text(_currentSortLabel()),
+                        ),
+                        if (nikValue.isNotEmpty)
+                          Chip(
+                            avatar: const Icon(Icons.badge, size: 18),
+                            label: Text('NIK $nikValue'),
+                          ),
+                        if (deptValue.isNotEmpty)
+                          Chip(
+                            avatar: const Icon(Icons.apartment, size: 18),
+                            label: Text('Dept $deptValue'),
+                          ),
+                        if (searchValue.isNotEmpty)
+                          Chip(
+                            avatar: const Icon(Icons.search, size: 18),
+                            label: Text(searchValue),
+                          ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-            ],
+              crossFadeState: _isFilterCollapsed
+                  ? CrossFadeState.showSecond
+                  : CrossFadeState.showFirst,
+              duration: const Duration(milliseconds: 220),
+              sizeCurve: Curves.easeInOut,
+              firstCurve: Curves.easeOut,
+              secondCurve: Curves.easeIn,
+            ),
           ],
         ),
       ),

@@ -752,3 +752,104 @@ Error "Sistem sedang memproses scan lain" muncul di jam sibuk (06:00–07:00 Shi
 - Repair/rebuild: tetap global lock, tidak terdampak ✓
 
 **File**: `SharedLib.gs` — `withCardLock()` (baru) · `GateFunctions.gs` — `bindKartu()`, `releaseKartu()` direfaktor
+
+---
+
+## FASE 43: Cek Absen Mingguan Web Menampilkan Satu Tanggal Saja
+
+**Tanggal**: 2026-08-11
+
+**Kondisi awal**
+- User memilih periode `week`, label periode sudah benar, tetapi tabel `Cek Absen` terlihat hanya berisi 1 tanggal.
+- Tombol `Unduh CSV` menghasilkan isi yang sama dengan tabel yang tampil, bukan seluruh periode.
+
+**Akar masalah**
+- `processAbsenReport()` di web memanggil `getAbsenReport()` tanpa `search`, `sort`, dan `pageSize`, sehingga backend memakai page default.
+- Halaman web tidak punya kontrol pagination aktif, jadi user hanya melihat potongan awal data periode.
+- `exportAbsenReport()` membangun CSV dari `REPORT_CACHE.absen.data`, yaitu data halaman yang tampil, bukan full dataset dari backend.
+
+**Perbaikan**
+- Web `processAbsenReport()` sekarang mengirim `page`, `search`, `sort`, dan `pageSize='ALL'`.
+- `buildPaginationMeta_()` di `ReportFunctions.gs` sekarang mendukung `pageSize='ALL'` untuk caller web.
+- Tombol `Unduh CSV` sekarang memanggil `exportAbsenReportCsv()` di GAS agar hasil ekspor selalu full periode.
+
+**Dampak**
+- Periode mingguan seperti `2026-W32` sekarang menampilkan semua tanggal dalam rentang `3 Aug 2026 - 9 Aug 2026`.
+- CSV tidak lagi mengikuti data halaman tampilan.
+- Android tetap memakai pagination `25` row per request, jadi perilakunya tidak berubah.
+
+**File**: `app.html` · `ReportFunctions.gs`
+
+---
+
+## FASE 44: Pagination Cek Absen Web Dipulihkan
+
+**Tanggal**: 2026-08-11
+
+**Koreksi temuan**
+- Setelah verifikasi ulang, backend `getAbsenReport()` sebenarnya sudah mengembalikan data periode dengan benar.
+- Gejala "hanya tanggal 8" atau "hanya tanggal 3" muncul karena web hanya menampilkan **halaman pertama 25 baris** sesuai urutan sort.
+- Renderer `Cek Absen` belum menampilkan kontrol pagination, sehingga user tidak punya jalan ke halaman 2, 3, dan seterusnya.
+
+**Perbaikan**
+- `processAbsenReport()` sekarang mengirim `pageSize=25` secara eksplisit agar kontrak frontend-backend jelas.
+- Ditambahkan `buildAbsenPaginationControls()` di `app.html`.
+- `renderAbsenReport()` sekarang menampilkan:
+  - info rentang baris aktif
+  - tombol `Prev`, nomor halaman, `Next`
+  - pagination di atas dan bawah tabel
+
+**Dampak**
+- Periode mingguan seperti `3 Aug 2026 - 9 Aug 2026` tetap dipotong per halaman, tetapi seluruh data sekarang bisa dijelajahi dari UI.
+- Sort `Tanggal (Terbaru)` dan `Tanggal (Terlama)` tidak lagi memberi kesan data tengah hilang.
+- Export CSV tetap full periode karena tetap diproses dari backend.
+
+**File**: `app.html`
+
+---
+
+## FASE 46: Filter Absen Android Auto-Collapse Setelah Data Muncul
+
+**Tanggal**: 2026-08-11
+
+**Kondisi awal**
+- Panel `Filter Absen` di APK Android selalu terbuka penuh.
+- Setelah hasil berhasil dimuat, area filter tetap memakan tinggi layar cukup besar sehingga daftar data absen kurang langsung terlihat.
+
+**Perbaikan**
+- Tambahkan mode `expanded/collapsed` di `AbsenScreen`.
+- Setelah fetch berhasil dan total data lebih dari 0, panel filter otomatis mengecil menjadi ringkasan.
+- Ringkasan tetap menampilkan konteks aktif: periode, urutan data, NIK/dept/search bila ada.
+- User tetap bisa membuka kembali panel filter lewat tombol expand/collapse di header card.
+- Jika hasil kosong atau fetch gagal, panel otomatis tetap terbuka agar user mudah revisi filter.
+
+**Dampak**
+- Fokus layar Android langsung pindah ke tabel/list hasil setelah filter berhasil diterapkan.
+- Filter tidak hilang total, hanya dipadatkan menjadi summary yang bisa dibuka lagi kapan saja.
+
+**File**: `android_app/lib/screens/absen_screen.dart`
+
+---
+
+## FASE 45: Export CSV Absen Kosong Saat NIK Dibiarkan Kosong
+
+**Tanggal**: 2026-08-11
+
+**Kondisi awal**
+- Tabel `Cek Absen` untuk admin/security bisa menampilkan seluruh periode walau input NIK kosong.
+- Saat `Unduh CSV`, file terbuat tetapi `TOTAL` menjadi `0` dan baris data kosong.
+
+**Akar masalah**
+- `exportAbsenReport()` mengubah NIK kosong menjadi string literal `'NIK'`.
+- Nilai `'NIK'` itu ikut dikirim ke `exportAbsenReportCsv()`, sehingga backend menganggap ada filter NIK dan tidak menemukan row yang cocok.
+
+**Perbaikan**
+- Pisahkan `rawNik` untuk request backend dari `filenameNik` untuk nama file.
+- Backend sekarang menerima NIK kosong apa adanya saat user memang ingin export seluruh periode.
+- Nama file tetap aman dengan fallback `SEMUA`.
+
+**Dampak**
+- Export CSV untuk admin/security dengan NIK kosong sekarang mengikuti data tabel/periode yang sedang diproses.
+- Kasus ini tidak mengubah export untuk mode karyawan atau saat NIK memang diisi.
+
+**File**: `app.html`

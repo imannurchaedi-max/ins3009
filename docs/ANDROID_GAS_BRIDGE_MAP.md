@@ -52,6 +52,27 @@ Dokumen ini sengaja dibuat untuk membantu maintenance koneksi Android ↔ Google
 - `submitGateRequest()` menyimpan ledger di `ANDROID_GATE_REQUESTS`.
 - `getGateRequestStatus()` menjadi sumber jawaban saat response submit utama hilang.
 
+### Locking gate request ledger (per-requestId, bukan document lock global)
+
+- Registrasi (`submitGateRequest`), klaim, dan finalisasi request di `processGateRequestById_()`
+  dikunci lewat `withGateRequestQueueLock_()` (`GateFunctions.gs`) — memakai mekanisme yang sama
+  dengan `withCardLock()` (marker `PropertiesService` + global lock singkat hanya untuk
+  check-then-set), tapi dengan key `'GRQ_' + requestId`.
+- **Kenapa bukan `withDocumentLock()`:** document lock bersifat global untuk seluruh
+  spreadsheet, jadi request Android untuk kartu A akan menunggu request kartu B. Jalur web
+  (`bindKartu`/`releaseKartu` langsung) tidak pernah punya masalah ini karena hanya memakai
+  `withCardLock()` per-kartu. Sebelum perbaikan ini, jalur Android (`submitGateRequest` →
+  `processGateRequestById_`) memegang document lock **dua kali** per scan (klaim + finalize),
+  menjadi penyebab utama keluhan "antrian kartu" dan binding yang sudah sukses di sheet tapi
+  masih terlihat pending/gagal di app (karena HTTP response tertahan menunggu giliran lock,
+  bukan karena tulisan datanya lambat).
+- Klaim juga menolak re-claim requestId yang statusnya masih `PROCESSING` dan baru (< 45 detik)
+  — mencegah `bindKartu`/`releaseKartu` terpanggil dobel jika ada retry yang tumpang tindih
+  dengan eksekusi yang masih berjalan.
+- `findGateRequestRecordById_()` membaca jendela 500 baris terbaru dulu sebelum fallback ke full
+  scan, supaya lookup requestId yang baru dibuat Android tetap cepat walau ledger
+  `ANDROID_GATE_REQUESTS` terus bertambah besar seiring waktu.
+
 ### Observability
 
 - `AndroidDiagnosticsService` menyimpan event lokal ketika request sukses, gagal, timeout, atau recovery polling dijalankan.

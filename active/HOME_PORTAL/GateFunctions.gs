@@ -338,16 +338,63 @@ function buildGateRequestRecordFromRow_(row, rowNumber) {
   };
 }
 
+// Android hanya pernah polling requestId yang baru saja ia buat sendiri, jadi
+// hampir semua lookup ada di baris-baris terbaru. Baca jendela terbaru dulu
+// (murah & cepat, tidak melebar seiring histori tumbuh) sebelum fallback ke
+// full scan untuk kasus langka (requestId lama / stale).
+const GATE_REQUEST_RECENT_WINDOW = 500;
+const GATE_REQUEST_ROW_WIDTH = 12; // jumlah kolom SHEET_GATE_REQUESTS
+
 function findGateRequestRecordById_(sheet, requestId) {
   const target = normalizeGateRequestId_(requestId);
   if (!target) return null;
 
-  const data = sheet.getDataRange().getValues();
-  for (let i = data.length - 1; i >= 1; i--) {
-    if (asText(data[i][0]).trim() !== target) continue;
-    return buildGateRequestRecordFromRow_(data[i], i + 1);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+
+  const startRow = Math.max(2, lastRow - GATE_REQUEST_RECENT_WINDOW + 1);
+  const recent = sheet.getRange(startRow, 1, lastRow - startRow + 1, GATE_REQUEST_ROW_WIDTH).getValues();
+  for (let i = recent.length - 1; i >= 0; i--) {
+    if (asText(recent[i][0]).trim() === target) {
+      return buildGateRequestRecordFromRow_(recent[i], startRow + i);
+    }
   }
+
+  if (startRow > 2) {
+    const older = sheet.getRange(2, 1, startRow - 2, GATE_REQUEST_ROW_WIDTH).getValues();
+    for (let i = older.length - 1; i >= 0; i--) {
+      if (asText(older[i][0]).trim() === target) {
+        return buildGateRequestRecordFromRow_(older[i], 2 + i);
+      }
+    }
+  }
+
   return null;
+}
+
+// Kunci queue per-requestId (bukan lock dokumen global) sehingga klaim/finalize
+// gate request untuk kartu A tidak pernah menunggu kartu B. Memakai mekanisme
+// yang sama dengan withCardLock (marker PropertiesService + global lock singkat
+// hanya untuk set atomic), tapi dengan namespace kunci terpisah dari lock fisik
+// kartu supaya keduanya tidak saling mengganggu.
+function withGateRequestQueueLock_(requestId, fn) {
+  return withCardLock('GRQ_' + requestId, fn);
+}
+
+function buildGatePendingResponse_(requestId, msg) {
+  return {
+    ok: true,
+    pending: true,
+    requestId: requestId,
+    requestStatus: 'PROCESSING',
+    msg: msg || 'Request sedang diproses. Mohon tunggu beberapa detik.'
+  };
+}
+
+function gateRequestUpdatedAtAgeMs_(updatedAtText) {
+  const parsed = parseAnyDate(updatedAtText);
+  if (!parsed) return Infinity;
+  return Date.now() - parsed.getTime();
 }
 
 function buildGateRequestApiResponse_(record) {
@@ -384,13 +431,22 @@ function processGateRequestById_(requestId) {
     return { ok: false, msg: 'requestId gate tidak valid.' };
   }
 
-  const claim = withDocumentLock(function() {
+  const GATE_REQUEST_PROCESSING_STALE_MS = 45 * 1000;
+
+  const claim = withGateRequestQueueLock_(normalizedRequestId, function() {
     const sheet = getSheet(SHEET_GATE_REQUESTS);
     const record = findGateRequestRecordById_(sheet, normalizedRequestId);
     if (!record) return { ok: false, msg: 'Request gate tidak ditemukan.' };
 
     if (record.status === 'SUCCESS' || record.status === 'FAILED') {
       return { ok: true, mode: 'final', record: record };
+    }
+
+    if (record.status === 'PROCESSING' &&
+        gateRequestUpdatedAtAgeMs_(record.updatedAt) < GATE_REQUEST_PROCESSING_STALE_MS) {
+      // Eksekusi lain masih aktif memproses requestId ini — jangan klaim ulang
+      // (mencegah bindKartu/releaseKartu terpanggil dobel secara konkuren).
+      return { ok: true, mode: 'in_progress', record: record };
     }
 
     const nowText = formatDateTime(nowWIB());
@@ -411,8 +467,15 @@ function processGateRequestById_(requestId) {
     };
   });
 
-  if (!claim || claim.ok === false) return claim || { ok: false, msg: 'Gagal klaim request gate.' };
-  if (claim.mode === 'final') return buildGateRequestApiResponse_(claim.record);
+  if (!claim) return { ok: false, msg: 'Gagal klaim request gate.' };
+  if (claim.ok === false) {
+    // withGateRequestQueueLock_ tidak dapat lock (eksekusi lain sedang klaim/
+    // finalize requestId yang sama persis) — bukan error bisnis, minta client polling lagi.
+    return buildGatePendingResponse_(normalizedRequestId, claim.msg);
+  }
+  if (claim.mode === 'final' || claim.mode === 'in_progress') {
+    return buildGateRequestApiResponse_(claim.record);
+  }
 
   const record = claim.record;
   const payload = record.payload || {};
@@ -430,7 +493,7 @@ function processGateRequestById_(requestId) {
     result = { ok: false, msg: eProcess.message };
   }
 
-  const finalized = withDocumentLock(function() {
+  const finalized = withGateRequestQueueLock_(normalizedRequestId, function() {
     const sheet = getSheet(SHEET_GATE_REQUESTS);
     const latest = findGateRequestRecordById_(sheet, normalizedRequestId);
     if (!latest) return { ok: false, msg: 'Request gate hilang saat finalisasi.' };
@@ -463,7 +526,13 @@ function processGateRequestById_(requestId) {
     };
   });
 
-  if (!finalized || finalized.ok === false) return finalized || { ok: false, msg: 'Gagal finalisasi request gate.' };
+  if (!finalized) return { ok: false, msg: 'Gagal finalisasi request gate.' };
+  if (finalized.ok === false) {
+    // Lock requestId sedang dipegang eksekusi lain (mis. duplikat klaim yang
+    // lolos). Kondisi biner (SUCCESS/FAILED) tetap akan konsisten begitu
+    // eksekusi lain selesai — beri tahu client untuk polling lagi, bukan gagal.
+    return buildGatePendingResponse_(normalizedRequestId, finalized.msg);
+  }
   return buildGateRequestApiResponse_(finalized.record);
 }
 
@@ -478,7 +547,9 @@ function submitGateRequest(payload) {
     const safePayload = sanitizeGateRequestPayload_(action, source);
     const payloadJson = JSON.stringify(safePayload);
 
-    const registered = withDocumentLock(function() {
+    // Dikunci per-requestId (bukan document lock global) — registrasi request
+    // untuk kartu A tidak lagi menunggu registrasi kartu B.
+    const registered = withGateRequestQueueLock_(requestId, function() {
       const sheet = getSheet(SHEET_GATE_REQUESTS);
       const existing = findGateRequestRecordById_(sheet, requestId);
       if (existing) {
@@ -507,7 +578,11 @@ function submitGateRequest(payload) {
         ''
       ]);
 
-      const row = sheet.getLastRow();
+      // Cari baris berdasarkan requestId (bukan asumsi getLastRow()) — dengan
+      // registrasi kartu lain berjalan paralel tanpa document lock, appendRow
+      // milik eksekusi lain bisa saja mendarat tepat setelah appendRow kita.
+      const insertedRecord = findGateRequestRecordById_(sheet, requestId);
+      const row = insertedRecord ? insertedRecord.row : sheet.getLastRow();
       applyNumberFormatToCell_(sheet, row, 1, '@');
       applyNumberFormatToCell_(sheet, row, 7, '@');
       applyNumberFormatToCell_(sheet, row, 8, '@');
@@ -515,8 +590,16 @@ function submitGateRequest(payload) {
       return { ok: true, mode: 'created' };
     });
 
-    if (!registered || registered.ok === false) {
-      return registered || { ok: false, msg: 'Gagal mendaftarkan request gate.' };
+    if (!registered) {
+      return { ok: false, msg: 'Gagal mendaftarkan request gate.' };
+    }
+    if (registered.ok === false) {
+      if (registered.msg === 'Kartu sedang diproses, coba scan ulang dalam beberapa detik.' ||
+          registered.msg === 'Sistem terlalu sibuk, coba scan ulang.') {
+        // Lock requestId sedang dipegang eksekusi lain (retry submit yang tumpang tindih).
+        return buildGatePendingResponse_(requestId, 'Request sedang didaftarkan. Mohon tunggu beberapa detik.');
+      }
+      return registered;
     }
     if (registered.mode === 'existing') {
       return buildGateRequestApiResponse_(registered.record);

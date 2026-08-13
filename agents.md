@@ -73,37 +73,33 @@ Every audit must produce:
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as `ins3009`. Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **ins3009** (1427 symbols, 2602 relationships, 111 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
-> If index status is stale, run `node .gitnexus/run.cjs analyze` from the project root.
+> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
 ## Always Do
 
-- **MUST run impact analysis before editing any function, class, or method.**
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with code edits.
-- **MUST run `detect_changes()` before committing** to verify the changed scope matches intent.
-- Prefer `context()` / `impact()` / `query()` over blind grep when tracing unfamiliar behavior.
-- Use `explain()` for security review when the PDG/taint layer is relevant.
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
 
 ## Never Do
 
-- NEVER edit a function, class, or method without first running `impact`.
-- NEVER ignore HIGH or CRITICAL risk warnings.
-- NEVER rename symbols with find-and-replace when graph-aware rename is required.
-- NEVER commit changes without checking `detect_changes()`.
-
-## Notes
-
-- FTS/BM25 may be unavailable on this machine even when graph indexing works. If that happens, rely on graph/context/impact workflows first.
-- Do not hardcode symbol counts or commit hashes into standing instructions; those values age quickly.
+- NEVER edit a function, class, or method without first running `impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit changes without running `detect_changes()` to check affected scope.
 
 ## Resources
 
 | Resource | Use for |
 |----------|---------|
 | `gitnexus://repo/ins3009/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/ins3009/clusters` | Functional areas |
-| `gitnexus://repo/ins3009/processes` | Execution flows |
+| `gitnexus://repo/ins3009/clusters` | All functional areas |
+| `gitnexus://repo/ins3009/processes` | All execution flows |
 | `gitnexus://repo/ins3009/process/{name}` | Step-by-step execution trace |
 
 ## CLI

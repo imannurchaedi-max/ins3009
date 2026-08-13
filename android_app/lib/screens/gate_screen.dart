@@ -283,9 +283,13 @@ class _GateScreenState extends State<GateScreen> {
         };
       }
 
-      final statusResult = await ApiService.post('getGateRequestStatus', {
-        'requestId': requestId,
-      });
+      final statusResult = await ApiService.post(
+        'getGateRequestStatus',
+        {
+          'requestId': requestId,
+        },
+        customTimeout: const Duration(seconds: 6),
+      );
       lastResult = statusResult;
 
       if (statusResult['ok'] == true && !_isPendingGateResponse(statusResult)) {
@@ -300,8 +304,11 @@ class _GateScreenState extends State<GateScreen> {
           (_isUnknownGateResponse(statusResult) ||
               ApiService.isConnectivityFailureResult(statusResult))) {
         hasResubmitted = true;
-        final replayResult =
-            await ApiService.post('submitGateRequest', submitPayload);
+        final replayResult = await ApiService.post(
+          'submitGateRequest',
+          submitPayload,
+          customTimeout: const Duration(seconds: 10),
+        );
         lastResult = replayResult;
 
         if (replayResult['ok'] == true &&

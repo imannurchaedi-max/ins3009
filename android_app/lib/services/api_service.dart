@@ -33,15 +33,17 @@ class ApiService {
     Map<String, dynamic> payload, {
     bool trackDiagnostics = true,
     bool allowFlush = true,
+    Duration? customTimeout,
   }) async {
     Map<String, dynamic>? lastFailure;
     final allowAutomaticRetry = !_nonIdempotentActions.contains(action);
     final startedAt = DateTime.now();
+    final effectiveTimeout = customTimeout ?? _requestTimeout;
 
     for (int attempt = 0; attempt < _retryDelaysMs.length; attempt++) {
       try {
         final result =
-            await _postInternal(action, payload).timeout(_requestTimeout);
+            await _postInternal(action, payload).timeout(effectiveTimeout);
         if (result['ok'] == true) {
           _afterRequest(
             action: action,

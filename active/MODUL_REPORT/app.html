@@ -33,7 +33,9 @@ const QR = {
   isStopping: false,
   context: null,
   usingNative: false,
-  successHandled: false
+  successHandled: false,
+  pendingValue: null,
+  pendingSince: 0
 };
 
 // ── State ──────────────────────────────────────────────────
@@ -1140,6 +1142,29 @@ function isValidSerial(value) {
   return /^[A-Z0-9_-]{3,32}$/.test(value || '');
 }
 
+// Kartu/QR harus terbaca dengan nilai yang SAMA selama minimal ini sebelum
+// diterima — 1 frame blur/pantulan cahaya kamera tidak lagi cukup untuk
+// misread. Murni logic client-side (decode callback live scanner), tidak
+// menyentuh eksekusi server GAS sama sekali. Tidak berlaku untuk scan dari
+// file foto (handleFallbackImage) karena itu cuma 1 gambar statis, bukan
+// stream frame yang bisa dibandingkan.
+const SCAN_STABLE_MS = 400;
+
+function isSerialStable(serial) {
+  const now = Date.now();
+  if (QR.pendingValue !== serial) {
+    QR.pendingValue = serial;
+    QR.pendingSince = now;
+    return false;
+  }
+  return (now - QR.pendingSince) >= SCAN_STABLE_MS;
+}
+
+function resetScanStability() {
+  QR.pendingValue = null;
+  QR.pendingSince = 0;
+}
+
 function resetSerialInput(context) {
   const input = document.getElementById(context + '-serial');
   const result = document.getElementById(context + '-result');
@@ -1399,7 +1424,8 @@ window.openLiveScanner = function(context) {
   
   // Set current context
   QR.context = context;
-  
+  resetScanStability();
+
   // Reset overlay
   document.getElementById('qr-result-text').textContent = 'Mencari barcode/QR...';
   setQRDiagnostic('');
@@ -1427,6 +1453,10 @@ window.openLiveScanner = function(context) {
       // onSuccess
       const serial = normalizeSerial(decodedText);
       if (serial && isValidSerial(serial)) {
+        if (!isSerialStable(serial)) {
+          document.getElementById('qr-result-text').textContent = 'Mengunci: ' + serial + '...';
+          return;
+        }
         indicateScanSuccess();
         document.getElementById('qr-result-text').textContent = 'Ditemukan: ' + serial;
         stopQRScanner().then(() => {
@@ -1456,6 +1486,7 @@ window.stopQRScanner = async function() {
     }
   }
   QR.isScanning = false;
+  resetScanStability();
   const overlay = document.getElementById('qr-overlay');
   const fbBtn = document.getElementById('qr-fallback-btn');
   if (fbBtn) fbBtn.style.display = 'none';

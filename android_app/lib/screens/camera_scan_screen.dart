@@ -36,8 +36,14 @@ class _CameraScanScreenState extends State<CameraScanScreen> {
     ],
   );
 
+  // Kartu/QR harus terbaca dengan nilai yang SAMA selama minimal ini sebelum
+  // diterima — 1 frame blur/pantulan cahaya tidak lagi cukup untuk misread.
+  static const Duration _stableReadDuration = Duration(milliseconds: 400);
+
   bool _handled = false;
   bool _torchEnabled = false;
+  String? _pendingValue;
+  DateTime? _pendingSince;
 
   @override
   void dispose() {
@@ -90,6 +96,22 @@ class _CameraScanScreenState extends State<CameraScanScreen> {
 
     final detectedValue = _pickBestValue(capture);
     if (detectedValue == null || detectedValue.isEmpty) return;
+
+    final now = DateTime.now();
+    if (_pendingValue != detectedValue) {
+      // Nilai berubah (atau baru pertama kali terlihat) — mulai hitung ulang
+      // window kestabilan, jangan langsung terima.
+      setState(() {
+        _pendingValue = detectedValue;
+        _pendingSince = now;
+      });
+      return;
+    }
+
+    final since = _pendingSince;
+    if (since == null || now.difference(since) < _stableReadDuration) {
+      return;
+    }
 
     _handled = true;
     await _controller.stop();
@@ -151,10 +173,18 @@ class _CameraScanScreenState extends State<CameraScanScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  const Icon(Icons.qr_code_scanner, color: Colors.white, size: 32),
+                  Icon(
+                    _pendingValue != null
+                        ? Icons.hourglass_top
+                        : Icons.qr_code_scanner,
+                    color: Colors.white,
+                    size: 32,
+                  ),
                   const SizedBox(height: 12),
                   Text(
-                    widget.subtitle,
+                    _pendingValue != null
+                        ? 'Mengunci kode: $_pendingValue ...'
+                        : widget.subtitle,
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.white, fontSize: 15),
                   ),

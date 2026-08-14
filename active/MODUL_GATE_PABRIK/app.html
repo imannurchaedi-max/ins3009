@@ -34,7 +34,9 @@ const QR = {
   context: null,
   usingNative: false,
   successHandled: false,
-  tesseractLoader: null
+  tesseractLoader: null,
+  pendingValue: null,
+  pendingSince: 0
 };
 
 // ── State ──────────────────────────────────────────────────
@@ -642,14 +644,23 @@ function confirmMasuk() {
       const userLng = position.coords.longitude;
       showResult('masuk', 'warning', 'Memproses absen...');
       
+      let reqTimeout = setTimeout(() => {
+        REQUEST_BUSY.masukConfirm = false;
+        setActionBusy('confirm-masuk', false);
+        showResult('masuk', 'error', 'Koneksi lambat atau terputus. Jika data Anda sudah masuk, abaikan pesan ini. Silakan muat ulang halaman.');
+        document.getElementById('masuk-confirm').classList.add('visible');
+      }, 35000);
+
       google.script.run
         .withFailureHandler(err => {
+          clearTimeout(reqTimeout);
           REQUEST_BUSY.masukConfirm = false;
           setActionBusy('confirm-masuk', false);
           handleGasFailure('masuk', err);
           document.getElementById('masuk-confirm').classList.add('visible');
         })
         .withSuccessHandler(res => {
+          clearTimeout(reqTimeout);
           REQUEST_BUSY.masukConfirm = false;
           setActionBusy('confirm-masuk', false);
           if (res.ok) {
@@ -691,11 +702,18 @@ window.forceReleaseOldCard = function(oldKartu) {
   showResult('masuk', 'warning', `Mencoba me-release paksa kartu ${oldKartu}...`);
   document.getElementById('masuk-confirm').classList.remove('visible');
   
+  let reqTimeout = setTimeout(() => {
+    showResult('masuk', 'error', 'Waktu request habis. Cek koneksi internet Anda atau muat ulang halaman.');
+    document.getElementById('masuk-confirm').classList.add('visible');
+  }, 35000);
+
   google.script.run
     .withFailureHandler(err => {
+      clearTimeout(reqTimeout);
       showResult('masuk', 'error', 'Gagal release paksa: ' + escHtml(getErrorMessage(err)));
     })
     .withSuccessHandler(res => {
+      clearTimeout(reqTimeout);
       if (res.ok) {
         showResult('masuk', 'success', `✅ Kartu ${oldKartu} berhasil dilepas secara paksa.<br>Silakan klik <strong>KONFIRMASI MASUK PABRIK</strong> kembali untuk mengikat kartu baru.`);
         document.getElementById('masuk-confirm').classList.add('visible');
@@ -810,14 +828,23 @@ function confirmKeluar() {
       const userLng = position.coords.longitude;
       showResult('keluar', 'warning', 'Memproses keluar...');
       
+      let reqTimeout = setTimeout(() => {
+        REQUEST_BUSY.keluarConfirm = false;
+        setActionBusy('confirm-keluar', false);
+        showResult('keluar', 'error', 'Koneksi lambat atau terputus. Jika data Anda sudah masuk, abaikan pesan ini. Silakan muat ulang halaman.');
+        document.getElementById('keluar-confirm').classList.add('visible');
+      }, 35000);
+
       google.script.run
         .withFailureHandler(err => {
+          clearTimeout(reqTimeout);
           REQUEST_BUSY.keluarConfirm = false;
           setActionBusy('confirm-keluar', false);
           handleGasFailure('keluar', err);
           document.getElementById('keluar-confirm').classList.add('visible');
         })
         .withSuccessHandler(res => {
+          clearTimeout(reqTimeout);
           REQUEST_BUSY.keluarConfirm = false;
           setActionBusy('confirm-keluar', false);
           if (res.ok) {
@@ -1298,6 +1325,27 @@ function normalizeSerial(value) {
 
 function isValidSerial(value) {
   return /^[A-Z0-9_-]{3,32}$/.test(value || '');
+}
+
+// Kartu/QR harus terbaca dengan nilai yang SAMA selama minimal ini sebelum
+// diterima — 1 frame blur/pantulan cahaya kamera tidak lagi cukup untuk
+// misread. Murni logic client-side (requestAnimationFrame/decode callback),
+// tidak menyentuh eksekusi server GAS sama sekali.
+const SCAN_STABLE_MS = 400;
+
+function isSerialStable(serial) {
+  const now = Date.now();
+  if (QR.pendingValue !== serial) {
+    QR.pendingValue = serial;
+    QR.pendingSince = now;
+    return false;
+  }
+  return (now - QR.pendingSince) >= SCAN_STABLE_MS;
+}
+
+function resetScanStability() {
+  QR.pendingValue = null;
+  QR.pendingSince = 0;
 }
 
 function resetSerialInput(context) {
@@ -1809,12 +1857,16 @@ async function startNativeCameraScanner(stream) {
           const rawValue = (barcodes.find(item => item && item.rawValue) || barcodes[0]).rawValue || '';
           const serial = normalizeSerial(rawValue);
           if (serial && isValidSerial(serial)) {
-            QR.successHandled = true;
-            indicateScanSuccess();
-            document.getElementById('qr-result-text').textContent = 'Ditemukan: ' + serial;
-            await stopQRScanner();
-            onSerialScanned(QR.context, serial);
-            return;
+            if (!isSerialStable(serial)) {
+              document.getElementById('qr-result-text').textContent = 'Mengunci: ' + serial + '...';
+            } else {
+              QR.successHandled = true;
+              indicateScanSuccess();
+              document.getElementById('qr-result-text').textContent = 'Ditemukan: ' + serial;
+              await stopQRScanner();
+              onSerialScanned(QR.context, serial);
+              return;
+            }
           }
         }
       }
@@ -1882,6 +1934,10 @@ async function startHtml5CameraScanner() {
     async decodedText => {
       const serial = normalizeSerial(decodedText);
       if (!serial || !isValidSerial(serial) || QR.successHandled) return;
+      if (!isSerialStable(serial)) {
+        document.getElementById('qr-result-text').textContent = 'Mengunci: ' + serial + '...';
+        return;
+      }
       QR.successHandled = true;
       indicateScanSuccess();
       document.getElementById('qr-result-text').textContent = 'Ditemukan: ' + serial;
@@ -1980,6 +2036,7 @@ window.openLiveScanner = async function(context) {
   // Set current context
   QR.context = context;
   QR.successHandled = false;
+  resetScanStability();
 
   // Reset overlay
   document.getElementById('qr-result-text').textContent = 'Mencari barcode/QR...';
@@ -2053,6 +2110,7 @@ window.stopQRScanner = async function() {
   QR.isStarting = false;
   QR.isStopping = false;
   QR.successHandled = false;
+  resetScanStability();
   const overlay = document.getElementById('qr-overlay');
   const fbBtn = document.getElementById('qr-fallback-btn');
   if (fbBtn) fbBtn.style.display = 'none';

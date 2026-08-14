@@ -96,6 +96,8 @@ Aplikasi Android dibangun untuk memudahkan proses *tapping* kartu ID (NFC) oleh 
    - Backend memproses request itu satu kali, menyimpan status `PENDING` / `PROCESSING` / `SUCCESS` / `FAILED`, lalu Android melakukan *poll* ke `getGateRequestStatus`.
    - Jika koneksi putus setelah submit, Android tidak mengulang mutasi dengan request baru; ia selalu mengecek request lama dulu memakai `requestId` yang sama.
    - Mekanisme ini membuat retry jaringan menjadi idempotent walau `bindKartu()` dan `releaseKartu()` sendiri tetap fungsi mutasi.
+   - **Locking ledger (2026-08-14)**: registrasi/klaim/finalisasi request di `processGateRequestById_()` dikunci lewat `withGateRequestQueueLock_()` (key `'GRQ_' + requestId`, mekanisme sama dengan `withCardLock`), **bukan** `withDocumentLock` global. Sebelumnya document lock global dipakai di sini dan membuat request kartu A menunggu kartu B — root cause keluhan "antrian kartu". Detail lengkap di `docs/ANDROID_GAS_BRIDGE_MAP.md`.
+   - Klaim juga menolak re-claim requestId yang statusnya masih `PROCESSING` dan baru (< 45 detik), mencegah `bindKartu`/`releaseKartu` terpanggil dobel oleh retry yang tumpang tindih.
 8. **HTTP Client Lifecycle Android**:
    - Transport Android tidak boleh membuat `HttpClient` baru untuk setiap request penting, karena itu memaksa DNS lookup, TCP connect, dan TLS handshake dari nol pada tiap call.
    - Client koneksi dibagikan ulang agar koneksi keep-alive ke `script.google.com` dan `script.googleusercontent.com` bisa dipakai kembali.
@@ -373,14 +375,20 @@ Untuk autodeploy berbasis perubahan file runtime, tersedia watcher lokal lewat `
 
 ## Catatan Runtime Penting
 
-- **Concurrency Gate & Area Scan**: Sistem mendukung hingga ~100 transaksi scan bersamaan. Arsitektur lock dua-tingkat:
-  - `withCardLock(cardNo, fn)` — per-kartu lock via PropertiesService; global lock hanya dipakai ~200ms untuk set/check, lalu dilepas. Kartu berbeda berjalan paralel penuh.
-  - `withDocumentLock(fn)` — global lock dengan retry 3x dan wait 30 detik; hanya untuk operasi berat (repair, rebuild recap, jadwal write).
-  - Gate scan (`bindKartu`, `releaseKartu`) dan Area scan (`scanAreaKerja`) semuanya memakai `withCardLock` untuk performa konkurensi maksimal. Recap update (`safeUpdateRecapAbsen`) dilakukan di luar lock.
+- **Concurrency Gate & Area Scan**: Sistem mendukung hingga ~100 transaksi scan bersamaan. Arsitektur lock memakai key spesifik per-entitas (bukan lock global) di seluruh jalur scan aktif:
+  - `withCardLock(key, fn)` — lock via PropertiesService keyed by string bebas; global lock hanya dipakai ~200ms untuk set/check, lalu dilepas. Key berbeda berjalan paralel penuh, tidak saling menunggu.
+    - Gate scan (`bindKartu`, `releaseKartu`) dan Area scan (`scanAreaKerja`) mengunci per nomor kartu.
+    - Ledger request Android (`submitGateRequest`/`processGateRequestById_`) mengunci per `requestId` lewat `withGateRequestQueueLock_()`.
+    - Recap update (`updateRecapAbsen`) mengunci per (`NIK` + `tanggal`) — bukan lagi document lock global (diperbaiki 2026-08-14; sebelumnya update recap satu karyawan bisa menahan update recap karyawan lain).
+  - `withDocumentLock(fn)` — global lock dengan retry 3x dan wait 30 detik; sengaja masih dipertahankan HANYA untuk operasi admin berat yang jarang jalan dan/atau butuh exclusive access ke seluruh sheet: repair (`fixAllSpreadsheetErrorsNow_`), rebuild recap historis, dan `JadwalFunctions.gs` (`saveJadwalShift`/`deleteJadwalShift` — `deleteJadwalShift` menghapus baris sehingga index baris lain bergeser, butuh exclusive lock).
+  - Prinsip: kalau sebuah operasi terjadi berkali-kali per menit di jalur scan real-time, dia HARUS dikunci per-entitas (card/requestId/NIK+tanggal), bukan document lock global — supaya throughput satu entitas tidak pernah menunggu entitas lain yang tidak terkait.
 - **Urutan timeline gate scan**:
   1. Baca validasi (karyawan, binding, factory status) — di luar lock, paralel
-  2. `withCardLock`: append ke BINDING + MASUK/KELUAR (~0.5 detik, per-kartu)
-  3. `safeUpdateRecapAbsen` — di luar lock, sheet ABSEN IN OUT MK
+  2. `withCardLock` (per nomor kartu): append ke BINDING + MASUK/KELUAR (~0.5 detik)
+  3. `safeUpdateRecapAbsen` — `withCardLock` terpisah (per NIK+tanggal), sheet ABSEN IN OUT MK
+- **Write-order bug class (date/time cell format)**: menulis string tanggal/jam ke sel LALU BARU mengunci `setNumberFormat('@')` tidak cukup — Google Sheets sudah keburu auto-convert string yang match pola tanggal/jam jadi tipe Date/Time sebelum baris `setNumberFormat` sempat jalan, sehingga tampilan sel mengikuti format locale default Sheets (tidak konsisten, mis. jam tanpa leading zero) alih-alih string literal yang ditulis. Pola aman: kunci format `'@'` **sebelum** `setValue()`, atau kalau baris baru dibuat via `appendRow()` (tidak bisa diformat dulu karena barisnya belum ada), tulis ulang value-nya setelah format dikunci. Lihat `docs/date-normalization-2026-08-02.md` untuk detail lengkap dan daftar kolom yang sudah diperbaiki (`WAKTU_BIND`, `WAKTU_RELEASE`, kolom TANGGAL/JAM di `ABSEN IN OUT MK` dan `REGISTRASI MASUK KELUAR AREA KERJA`, `CREATED_AT`/`UPDATED_AT` di `ANDROID_GATE_REQUESTS`).
+- **Auto-repair terjadwal**: menu *DAM Access Control → ⏰ Aktifkan Auto-Repair Malam Hari* memasang time-driven trigger yang menjalankan `fixAllSpreadsheetErrorsNow_()` otomatis tiap hari ~02:00 WIB, sebagai jaring pengaman berkelanjutan terhadap drift data (bukan pengganti fix di write path, cuma pembersih data lama). Detail di `docs/date-normalization-2026-08-02.md`.
+- **Stable-read debounce kamera**: baik scanner Android (`mobile_scanner`) maupun web (`BarcodeDetector`/`html5-qrcode` di tiap `app.html`) sekarang mensyaratkan nilai yang sama terbaca konsisten selama ~400ms sebelum diterima, bukan langsung menerima hasil frame pertama. Ini mengurangi misread dari 1 frame blur/pantulan cahaya. Android memakai `DetectionSpeed.unrestricted` (bukan `noDuplicates`) supaya `onDetect` tetap terpanggil berulang untuk value yang sama — prasyarat wajib untuk debounce ini bekerja.
 - Header sheet wajib sinkron dengan definisi runtime di `SharedLib.gs`.
 - Klasifikasi `internal/external` mengutamakan tipe karyawan dari master data.
 - `escHtml()` tersedia di backend untuk sanitasi output HTML.

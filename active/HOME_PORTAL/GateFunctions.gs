@@ -452,9 +452,12 @@ function processGateRequestById_(requestId) {
     const nowText = formatDateTime(nowWIB());
     const nextAttempt = (record.attemptCount || 0) + 1;
     sheet.getRange(record.row, 6).setValue('PROCESSING');
+    // Kunci format '@' SEBELUM menulis nowText — kalau setValue lebih dulu,
+    // Sheets auto-convert string tanggal jadi Date beneran dan mengunci
+    // format sesudahnya tidak menuliskan ulang value-nya.
+    applyNumberFormatToCell_(sheet, record.row, 8, '@');
     sheet.getRange(record.row, 8).setValue(nowText);
     sheet.getRange(record.row, 9).setValue(nextAttempt);
-    applyNumberFormatToCell_(sheet, record.row, 8, '@');
 
     return {
       ok: true,
@@ -507,12 +510,13 @@ function processGateRequestById_(requestId) {
     const lastError = result && result.ok ? '' : asText(result && result.msg).trim();
 
     sheet.getRange(latest.row, 6).setValue(finalStatus);
-    sheet.getRange(latest.row, 8).setValue(updatedAt);
-    sheet.getRange(latest.row, 11).setValue(responseJson);
-    sheet.getRange(latest.row, 12).setValue(lastError);
+    // Kunci format '@' SEBELUM menulis updatedAt (lihat catatan di langkah klaim).
     applyNumberFormatToCell_(sheet, latest.row, 8, '@');
+    sheet.getRange(latest.row, 8).setValue(updatedAt);
     applyNumberFormatToCell_(sheet, latest.row, 11, '@');
+    sheet.getRange(latest.row, 11).setValue(responseJson);
     applyNumberFormatToCell_(sheet, latest.row, 12, '@');
+    sheet.getRange(latest.row, 12).setValue(lastError);
 
     return {
       ok: true,
@@ -587,6 +591,14 @@ function submitGateRequest(payload) {
       applyNumberFormatToCell_(sheet, row, 7, '@');
       applyNumberFormatToCell_(sheet, row, 8, '@');
       applyNumberFormatToCell_(sheet, row, 10, '@');
+      // appendRow() sudah menulis nowText SEBELUM format '@' dikunci, jadi
+      // Sheets sempat auto-convert string tanggal itu jadi Date beneran.
+      // Kunci format saja tidak me-rewrite value-nya — tulis ulang di sini
+      // supaya CREATED_AT/UPDATED_AT benar-benar literal text, bukan Date
+      // yang nanti ditampilkan pakai format locale default (jam tanpa
+      // leading zero, dst).
+      sheet.getRange(row, 7).setValue(nowText);
+      sheet.getRange(row, 8).setValue(nowText);
       return { ok: true, mode: 'created' };
     });
 
@@ -749,6 +761,12 @@ function bindKartu(noKartuMK, nik, loker, userLat, userLng) {
       applyNumberFormatToCell_(sheetB, sheetB.getLastRow(), 1, '@');  // NO KARTU MK = plain text
       sheetB.getRange(sheetB.getLastRow(), 1).setValue(asText(no2));
       applyNumberFormatToCell_(sheetB, sheetB.getLastRow(), 6, '@');  // plain text
+      // appendRow menulis waktu2 SEBELUM format '@' dikunci di atas, jadi
+      // Sheets sempat auto-convert ke Date beneran — tulis ulang literal
+      // di sini (pola sama seperti NO_KARTU_MK) supaya WAKTU_BIND tidak
+      // ditampilkan pakai format locale default yang tidak konsisten
+      // (mis. jam tanpa leading zero).
+      sheetB.getRange(sheetB.getLastRow(), 6).setValue(waktu2);
 
       var sheetMasuk = getSheet(SHEET_MASUK_PABRIK);
       sheetMasuk.appendRow([no2, kar2.nik, kar2.nama, tanggal2Str, jam2, shiftLabel2, loker || '']);
@@ -857,8 +875,11 @@ function releaseKartu(noKartuMK, loker, userLat, userLng) {
       sheetB.getRange(binding2.row, 7).setValue('FREE');
       var releaseCol = getHeaderIndex(sheetB, 'WAKTU_RELEASE');
       if (releaseCol > 0) {
-        sheetB.getRange(binding2.row, releaseCol).setValue(waktu);
+        // Kunci format '@' SEBELUM setValue — kalau kebalik, Sheets sudah
+        // keburu auto-convert string tanggal jadi Date beneran sebelum
+        // formatnya dikunci (lihat catatan sama di bindKartu/WAKTU_BIND).
         applyNumberFormatToCell_(sheetB, binding2.row, releaseCol, '@');  // plain text
+        sheetB.getRange(binding2.row, releaseCol).setValue(waktu);
       }
 
       var sheetKeluar = getSheet(SHEET_KELUAR_PABRIK);

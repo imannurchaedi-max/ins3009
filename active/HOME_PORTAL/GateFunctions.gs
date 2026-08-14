@@ -30,7 +30,14 @@ function getFactoryFlowStatusFromLogs_(nik, tanggal) {
 
 // ── Recap Absen Engine ────────────────────────────────────
 function updateRecapAbsen(tanggal, nik, nama, dept, jabatan, jamMasuk, jamKeluar, noKartuMK, noLoker) {
-  return withDocumentLock(function() {
+  // Dikunci per (NIK + tanggal), bukan document lock global — dipanggil di
+  // SETIAP scan masuk/keluar (web maupun Android). Kalau pakai document lock,
+  // update recap satu karyawan akan menunggu update recap karyawan lain,
+  // persis masalah antrian yang sudah diperbaiki di jalur gate Android.
+  const lockKeyNik = asText(nik).trim().replace(/\.0$/, '');
+  const lockKey = 'RECAP_' + lockKeyNik + '_' + asText(tanggal).trim();
+
+  return withCardLock(lockKey, function() {
     try {
       const sheet = getSheet(SHEET_RECAP_ABSEN);
       const lastRow = sheet.getLastRow();
@@ -85,8 +92,14 @@ function updateRecapAbsen(tanggal, nik, nama, dept, jabatan, jamMasuk, jamKeluar
         existingJamKeluar = existingJamKeluar || existingJams[1];
         const updatedStatus = getRecapStatus(existingJamMasuk, existingJamKeluar);
         
-        if (jamMasuk  && colJamMasuk  > 0) sheet.getRange(foundRow, colJamMasuk).setValue(jamMasuk);
-        if (jamKeluar && colJamKeluar > 0) sheet.getRange(foundRow, colJamKeluar).setValue(jamKeluar);
+        if (jamMasuk && colJamMasuk > 0) {
+          applyNumberFormatToCell_(sheet, foundRow, colJamMasuk, '@');
+          sheet.getRange(foundRow, colJamMasuk).setValue(jamMasuk);
+        }
+        if (jamKeluar && colJamKeluar > 0) {
+          applyNumberFormatToCell_(sheet, foundRow, colJamKeluar, '@');
+          sheet.getRange(foundRow, colJamKeluar).setValue(jamKeluar);
+        }
         if (colStatus   > 0) sheet.getRange(foundRow, colStatus).setValue(updatedStatus);
         if (noKartuMK && colNoKartu  > 0) {
           sheet.getRange(foundRow, colNoKartu).setNumberFormat('@');
@@ -109,10 +122,20 @@ function updateRecapAbsen(tanggal, nik, nama, dept, jabatan, jamMasuk, jamKeluar
         ];
         sheet.appendRow(newRow);
         const newRowIdx = sheet.getLastRow();
-        // Set all date/time columns as plain text so Sheets never reformats
+        // Kunci format '@' lalu TULIS ULANG value-nya — appendRow di atas
+        // bisa saja sudah membuat Sheets auto-convert tanggal/jam jadi
+        // Date/Time beneran sebelum baris ini sempat mengunci formatnya
+        // (pola bug yang sama seperti WAKTU_BIND di bindKartu).
         sheet.getRange(newRowIdx, 1).setNumberFormat('@');  // TANGGAL = plain text
-        if (colJamMasuk  > 0) sheet.getRange(newRowIdx, colJamMasuk).setNumberFormat('@');
-        if (colJamKeluar > 0) sheet.getRange(newRowIdx, colJamKeluar).setNumberFormat('@');
+        sheet.getRange(newRowIdx, 1).setValue(recapDateISO);
+        if (colJamMasuk  > 0) {
+          sheet.getRange(newRowIdx, colJamMasuk).setNumberFormat('@');
+          sheet.getRange(newRowIdx, colJamMasuk).setValue(jamMasuk || '');
+        }
+        if (colJamKeluar > 0) {
+          sheet.getRange(newRowIdx, colJamKeluar).setNumberFormat('@');
+          sheet.getRange(newRowIdx, colJamKeluar).setValue(jamKeluar || '');
+        }
         if (colNoKartu   > 0) {
           sheet.getRange(newRowIdx, colNoKartu).setNumberFormat('@');
           sheet.getRange(newRowIdx, colNoKartu).setValue(asText(noKartuMK || ''));

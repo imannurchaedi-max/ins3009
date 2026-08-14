@@ -72,7 +72,13 @@ function scanAreaKerja(noKartuMK, tujuan, catatan, forceMode) {
       else                          inout = (lastInOut === 'OUT') ? 'IN' : 'OUT';
 
       sheetA.appendRow([no, inout, formatDateISO(now), formatTime(now), kar.nik, kar.nama, areaTujuan, areaCatatan]);
-      applyNumberFormatToCell_(sheetA, sheetA.getLastRow(), 3, '@');  // plain text
+      applyNumberFormatToCell_(sheetA, sheetA.getLastRow(), 3, '@');  // TANGGAL = plain text (ISO, aman)
+      // Kolom JAM (4) sebelumnya tidak pernah dikunci ke plain text sama
+      // sekali — berisiko Sheets auto-convert jadi Time beneran lalu
+      // ditampilkan pakai format locale default yang tidak konsisten
+      // (pola bug sama seperti WAKTU_BIND). Kunci + tulis ulang.
+      applyNumberFormatToCell_(sheetA, sheetA.getLastRow(), 4, '@');
+      sheetA.getRange(sheetA.getLastRow(), 4).setValue(formatTime(now));
 
       return {
         ok: true, inout, noKartuMK: no, karyawan: kar, waktu,

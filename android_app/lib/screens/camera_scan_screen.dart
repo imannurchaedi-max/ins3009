@@ -17,7 +17,12 @@ class CameraScanScreen extends StatefulWidget {
 
 class _CameraScanScreenState extends State<CameraScanScreen> {
   final MobileScannerController _controller = MobileScannerController(
-    detectionSpeed: DetectionSpeed.noDuplicates,
+    // unrestricted, bukan noDuplicates — kita butuh onDetect terus terpanggil
+    // untuk value yang SAMA supaya debounce _handleDetection bisa mengonfirmasi
+    // kestabilan bacaan selama _stableReadDuration. noDuplicates menahan
+    // callback berulang untuk value sama sehingga konfirmasi tidak pernah
+    // tercapai (macet permanen di "Mengunci kode...").
+    detectionSpeed: DetectionSpeed.unrestricted,
     facing: CameraFacing.back,
     formats: const <BarcodeFormat>[
       BarcodeFormat.qrCode,

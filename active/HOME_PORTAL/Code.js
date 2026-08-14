@@ -29,6 +29,9 @@ function onOpen() {
       .addItem('3. Rebuild Recap Absen Dari Log', 'rebuildRecapAbsenInOutMK')
       .addSeparator()
       .addItem('🛠️ Fix & Clean All Spreadsheet Errors', 'fixAllSpreadsheetErrors')
+      .addSeparator()
+      .addItem('⏰ Aktifkan Auto-Repair Malam Hari', 'setupNightlyDataRepairTrigger')
+      .addItem('🌙 Nonaktifkan Auto-Repair Malam Hari', 'disableNightlyDataRepairTrigger')
       .addToUi();
   } catch(e) {
     Logger.log('Menu spreadsheet tidak tersedia: ' + e.message);

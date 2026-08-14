@@ -1193,3 +1193,64 @@ function fixAllSpreadsheetErrors() {
     'Sistem akan membersihkan NIK, menormalkan tanggal dan jam, memperbaiki shift, lalu membangun ulang recap secara bertahap.'
   );
 }
+
+// ============================================================
+//  AUTO-REPAIR TERJADWAL (nightly trigger)
+// ============================================================
+// Dijadwalkan malam hari (bukan jam kerja) supaya withDocumentLock di
+// fixAllSpreadsheetErrorsNow_ tidak bentrok dengan lock antrian gate scan
+// yang sedang aktif dipakai saat jam operasional pabrik.
+const NIGHTLY_REPAIR_TRIGGER_HANDLER = 'runNightlyDataRepairJob_';
+const NIGHTLY_REPAIR_HOUR = 2; // 02:00 Asia/Jakarta (lihat appsscript.json timeZone)
+
+function runNightlyDataRepairJob_() {
+  const result = fixAllSpreadsheetErrorsNow_();
+  appendRepairLog_('nightlyDataRepairJob', {
+    ok: result && result.ok,
+    msg: result && result.msg,
+    trigger: 'time-driven'
+  });
+  return result;
+}
+
+function setupNightlyDataRepairTrigger() {
+  try {
+    removeNightlyDataRepairTrigger_();
+    ScriptApp.newTrigger(NIGHTLY_REPAIR_TRIGGER_HANDLER)
+      .timeBased()
+      .atHour(NIGHTLY_REPAIR_HOUR)
+      .everyDays(1)
+      .create();
+    showSpreadsheetAlert_(
+      'Auto-repair malam hari aktif. Sistem akan otomatis menjalankan "Fix & Clean All Spreadsheet Errors" setiap hari sekitar jam ' +
+      NIGHTLY_REPAIR_HOUR + ':00 WIB.'
+    );
+    appendRepairLog_('setupNightlyDataRepairTrigger', { ok: true, hour: NIGHTLY_REPAIR_HOUR });
+  } catch (e) {
+    const msg = 'Gagal mengaktifkan auto-repair malam hari: ' + e.message;
+    showSpreadsheetAlert_(msg);
+    appendRepairLog_('setupNightlyDataRepairTrigger', { ok: false, msg: msg });
+  }
+}
+
+function removeNightlyDataRepairTrigger_() {
+  const triggers = ScriptApp.getProjectTriggers();
+  let removed = 0;
+  for (let i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === NIGHTLY_REPAIR_TRIGGER_HANDLER) {
+      ScriptApp.deleteTrigger(triggers[i]);
+      removed++;
+    }
+  }
+  return removed;
+}
+
+function disableNightlyDataRepairTrigger() {
+  const removed = removeNightlyDataRepairTrigger_();
+  showSpreadsheetAlert_(
+    removed > 0
+      ? 'Auto-repair malam hari dinonaktifkan.'
+      : 'Auto-repair malam hari memang belum aktif — tidak ada yang perlu dinonaktifkan.'
+  );
+  appendRepairLog_('disableNightlyDataRepairTrigger', { ok: true, removed: removed });
+}

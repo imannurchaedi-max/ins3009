@@ -27,9 +27,13 @@ function stringifyRepairSamples_(samples) {
 function appendRepairLog_(actionName, payload) {
   try {
     const ss = getSpreadsheet();
-    let sheet = ss.getSheetByName('LOG');
+    // Nama tab dibuat spesifik ('SYSTEM_REPAIR_LOG', bukan 'LOG') supaya
+    // tidak nabrak sheet lain yang kebetulan sudah dipakai user dengan nama
+    // generik 'LOG' (pernah kejadian: header-nya beda, ensureHeader jadi
+    // gagal terus dan menyembunyikan error asli dari pemanggil fungsi ini).
+    let sheet = ss.getSheetByName('SYSTEM_REPAIR_LOG');
     if (!sheet) {
-      sheet = ss.insertSheet('LOG');
+      sheet = ss.insertSheet('SYSTEM_REPAIR_LOG');
     }
 
     const headers = ['WAKTU', 'ACTION', 'STATUS', 'RINGKASAN', 'DETAIL'];
@@ -1214,13 +1218,18 @@ function runNightlyDataRepairJob_() {
 }
 
 function setupNightlyDataRepairTrigger() {
+  Logger.log('setupNightlyDataRepairTrigger: mulai, akun aktif = ' + Session.getEffectiveUser().getEmail());
   try {
-    removeNightlyDataRepairTrigger_();
+    const removedCount = removeNightlyDataRepairTrigger_();
+    Logger.log('setupNightlyDataRepairTrigger: trigger lama dihapus = ' + removedCount);
+
     ScriptApp.newTrigger(NIGHTLY_REPAIR_TRIGGER_HANDLER)
       .timeBased()
       .atHour(NIGHTLY_REPAIR_HOUR)
       .everyDays(1)
       .create();
+    Logger.log('setupNightlyDataRepairTrigger: trigger baru berhasil dibuat');
+
     showSpreadsheetAlert_(
       'Auto-repair malam hari aktif. Sistem akan otomatis menjalankan "Fix & Clean All Spreadsheet Errors" setiap hari sekitar jam ' +
       NIGHTLY_REPAIR_HOUR + ':00 WIB.'
@@ -1228,6 +1237,7 @@ function setupNightlyDataRepairTrigger() {
     appendRepairLog_('setupNightlyDataRepairTrigger', { ok: true, hour: NIGHTLY_REPAIR_HOUR });
   } catch (e) {
     const msg = 'Gagal mengaktifkan auto-repair malam hari: ' + e.message;
+    Logger.log('setupNightlyDataRepairTrigger: GAGAL — ' + e.message);
     showSpreadsheetAlert_(msg);
     appendRepairLog_('setupNightlyDataRepairTrigger', { ok: false, msg: msg });
   }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/session_provider.dart';
 import '../services/api_service.dart';
+import '../services/update_service.dart';
 import 'gate_screen.dart';
 import 'area_screen.dart';
 import 'dashboard_screen.dart';
@@ -30,6 +31,7 @@ class _HomeScreenState extends State<HomeScreen> {
       const Duration(seconds: 90),
       (_) => _warmupGateway(silent: true),
     );
+    _checkForUpdate(silent: true);
   }
 
   @override
@@ -101,6 +103,100 @@ class _HomeScreenState extends State<HomeScreen> {
     await sessionProvider.logout();
   }
 
+  Future<void> _checkForUpdate({bool silent = false}) async {
+    final update = await UpdateService.checkForUpdate();
+    if (!mounted) return;
+
+    if (update == null) {
+      if (!silent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sudah pakai versi terbaru.')),
+        );
+      }
+      return;
+    }
+
+    _showUpdateDialog(update);
+  }
+
+  void _showUpdateDialog(UpdateInfo update) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          double? progress;
+          bool downloading = false;
+          String? error;
+
+          Future<void> startUpdate() async {
+            setDialogState(() {
+              downloading = true;
+              error = null;
+            });
+            try {
+              final filePath = await UpdateService.downloadApk(
+                update.downloadUrl,
+                onProgress: (received, total) {
+                  if (total != null && total > 0) {
+                    setDialogState(() => progress = received / total);
+                  }
+                },
+              );
+              await UpdateService.installApk(filePath);
+              if (Navigator.of(dialogContext).canPop()) {
+                Navigator.of(dialogContext).pop();
+              }
+            } catch (e) {
+              setDialogState(() {
+                downloading = false;
+                error = 'Gagal download update: $e';
+              });
+            }
+          }
+
+          return AlertDialog(
+            title: Text('Update tersedia (v${update.version})'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (update.releaseNotes.trim().isNotEmpty)
+                    Text(update.releaseNotes.trim()),
+                  if (downloading) ...[
+                    const SizedBox(height: 16),
+                    LinearProgressIndicator(value: progress),
+                    const SizedBox(height: 8),
+                    Text(progress != null
+                        ? '${(progress! * 100).toStringAsFixed(0)}%'
+                        : 'Mengunduh...'),
+                  ],
+                  if (error != null) ...[
+                    const SizedBox(height: 12),
+                    Text(error!, style: const TextStyle(color: Colors.red)),
+                  ],
+                ],
+              ),
+            ),
+            actions: downloading
+                ? []
+                : [
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text('Nanti'),
+                    ),
+                    FilledButton(
+                      onPressed: startUpdate,
+                      child: const Text('Update Sekarang'),
+                    ),
+                  ],
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _warmupGateway({bool silent = false}) async {
     if (!silent && mounted) {
       setState(() {
@@ -162,6 +258,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.system_update),
+            onPressed: () => _checkForUpdate(silent: false),
+            tooltip: 'Cek Update',
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _handleLogout,

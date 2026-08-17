@@ -1,4 +1,4 @@
-package com.example.dam_android_app
+package com.dayaanugrahmulya.dam_access_control
 
 import io.flutter.embedding.android.FlutterActivity
 

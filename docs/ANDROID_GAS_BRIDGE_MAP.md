@@ -8,6 +8,7 @@ Dokumen ini sengaja dibuat untuk membantu maintenance koneksi Android ↔ Google
 - Router backend Android: `active/HOME_PORTAL/Code.js::doPost()`
 - Domain runtime utama: `active/HOME_PORTAL/`
 - Arsip lama di `Junk/` bukan source of truth dan tidak boleh dipakai untuk membaca flow aktif
+- `applicationId`/namespace Android aktif: `com.dayaanugrahmulya.dam_access_control` (diganti dari default template `com.example.dam_android_app` 2026-08-17 — lihat `android/app/build.gradle.kts`). Build lama dengan `com.example.*` adalah identitas app berbeda di Android, tidak bisa di-update in-place ke package baru ini.
 
 ## Bridge Flow Utama
 
@@ -39,7 +40,7 @@ Dokumen ini sengaja dibuat untuk membantu maintenance koneksi Android ↔ Google
 | `area_screen.dart` | `scanAreaKerja` | `scanAreaKerja()` | `BINDING_KARTU_MK`, `KARYAWAN`, `REGISTRASI MASUK KELUAR AREA KERJA`, `ABSEN IN OUT MK` | `REGISTRASI MASUK KELUAR AREA KERJA` | scan area kerja; butuh `sessionToken` valid |
 | `dashboard_screen.dart` | `getKehadiranDashboard` | `getKehadiranDashboard()` | `ABSEN IN OUT MK`, `KARYAWAN`, `JADWAL_SHIFT` | cache script | dashboard kehadiran (satu-satunya action dashboard yang dipanggil `dashboard_screen.dart` — `getDashboardData` tidak dipakai Android) |
 | `area_screen.dart` | `getRecentAreaLogs` | `getRecentAreaLogs()` | `REGISTRASI MASUK KELUAR AREA KERJA` | - | recent area logs |
-| `absen_screen.dart` | `getAbsenReport` | `getAbsenReport()` | `ABSEN IN OUT MK`, `KARYAWAN`, `JADWAL_SHIFT` | cache script | report absen |
+| `absen_screen.dart` | `getAbsenReport` (+ optional `typeFilter`) | `getAbsenReport()` | `ABSEN IN OUT MK`, `KARYAWAN`, `JADWAL_SHIFT` | cache script | report absen. `typeFilter='outsource'` dikirim otomatis untuk vendor admin (`SessionModel.isVendorAdmin` — role PENGAWAS + type VENDOR), yang juga melewati dept-lock PENGAWAS normal — lihat `docs/GAS_ARCHITECTURE.md` domain Report |
 | `absen_screen.dart` | `getAreaActivityReport` | `getAreaActivityReport()` | `REGISTRASI MASUK KELUAR AREA KERJA`, `KARYAWAN` | cache script | report area |
 | `home_screen.dart` | `pingAndroidGateway` | `pingAndroidGateway()` | - | - | warmup koneksi |
 | `api_service.dart` | `logAndroidDiagnostics` | `logAndroidDiagnostics()` | - | `ANDROID_DIAGNOSTICS` | flush batch telemetry |

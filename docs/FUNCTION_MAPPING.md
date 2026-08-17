@@ -2,7 +2,7 @@
 
 Daftar lengkap semua fungsi backend (GAS) dan frontend di project EMPLOYEE TRACKER. Gunakan sebagai index pencarian cepat saat ingin menemukan atau memperbaiki fungsi tertentu.
 
-**Acuan**: `reports/gas_runtime_comparison.json` (217 GAS functions, 382 frontend functions, 20 unique frontend GAS calls, 10 sheet constants) · Audit terakhir: 2026-08-17
+**Acuan**: `reports/gas_runtime_comparison.json` (217 GAS functions, 383 frontend functions, 20 unique frontend GAS calls, 10 sheet constants) · Audit terakhir: 2026-08-17
 
 ---
 

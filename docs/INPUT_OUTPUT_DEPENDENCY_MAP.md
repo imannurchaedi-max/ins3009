@@ -14,19 +14,20 @@ Dokumen ini merangkum kontrak input, output, dependency sheet, dan caller untuk 
 
 | Operation | Caller | Input | Output | Read Sheet | Write Sheet | Dependency Penting |
 |---|---|---|---|---|---|---|
-| `verifyLogin(nik, password)` | `app.html::handleLoginSubmit()`, `android_app/lib/providers/session_provider.dart` | `nik`, `password` | `ok`, `msg`, `karyawan`, `depts` | `KARYAWAN` | - | password kosong masih valid untuk user tertentu; payload user dibentuk oleh `makeKaryawanPayload()` |
-| `verifySession(nik/sessionToken)` | `app.html::restoreSavedSession()`, Android bootstrap session | `nik` atau `sessionToken` | `ok`, `msg`, `karyawan`, `depts` | `KARYAWAN` | - | session Android memakai `sessionToken || nik`; restore lokal berjalan dulu lalu verify di background |
+| `verifyLogin(nik, password)` | `app.html::handleLoginSubmit()`, `android_app/lib/providers/session_provider.dart` | `nik`, `password` | `ok`, `msg`, `karyawan`, `depts`, `sessionToken` (2026-08-17, dipakai Android) | `KARYAWAN`, `ANDROID_SESSIONS` (write token) | `ANDROID_SESSIONS` | password kosong masih valid untuk user tertentu; payload user dibentuk oleh `makeKaryawanPayload()`; sukses juga menerbitkan `sessionToken` real via `generateSessionToken_()` |
+| `verifySession(nik)` — web only | `app.html::restoreSavedSession()` | `nik` | `ok`, `msg`, `karyawan`, `depts` | `KARYAWAN` | - | tetap lookup by NIK, TIDAK diubah (web tetap pakai model lama, lihat `docs/GAS_ARCHITECTURE.md`) |
+| `verifySession` (action Android, doPost) → `verifySessionToken_(token)` | Android bootstrap session | `sessionToken` | `ok`, `msg`, `karyawan`, `depts` | `ANDROID_SESSIONS`, `KARYAWAN` | - | verifikasi token nyata, **bukan** lookup NIK; restore lokal (flutter_secure_storage) berjalan dulu lalu verify di background |
 | `searchKaryawan(query)` | web search, Android helper tertentu | `query` | `ok`, `data[]` | `KARYAWAN` | - | minimum length query harus valid |
 
 ## Gate / Pabrik
 
 | Operation | Caller | Input | Output | Read Sheet | Write Sheet | Dependency Penting |
 |---|---|---|---|---|---|---|
-| `submitGateRequest(payload)` | Android `gate_screen.dart` | `requestId`, `action`, payload gate (`bindKartu` / `releaseKartu`) | `ok`, `status`, `requestId`, optional hasil mutasi | `ANDROID_GATE_REQUESTS`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK`, `KARYAWAN` | `ANDROID_GATE_REQUESTS`, lalu domain gate terkait | pintu masuk idempotent untuk mutasi gate Android; request lama tidak boleh dibuat ulang dengan ID baru saat koneksi putus |
+| `submitGateRequest(payload)` | Android `gate_screen.dart` | `requestId`, `action`, payload gate (`bindKartu` / `releaseKartu`), `sessionToken` (wajib, doPost) | `ok`, `status`, `requestId`, optional hasil mutasi | `ANDROID_GATE_REQUESTS`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK`, `KARYAWAN`, `ANDROID_SESSIONS` | `ANDROID_GATE_REQUESTS`, lalu domain gate terkait | pintu masuk idempotent untuk mutasi gate Android; request lama tidak boleh dibuat ulang dengan ID baru saat koneksi putus; `doPost()` menolak tanpa `sessionToken` valid |
 | `getGateRequestStatus(requestId)` | Android polling recovery | `requestId` | `ok`, `status`, `response`, `lastError` | `ANDROID_GATE_REQUESTS` | - | dipakai setelah submit sukses tapi response utama hilang atau timeout |
 | `getBindingStatus(noKartuMK)` | web gate, Android gate | `noKartuMK` | `ok`, `status`, `nik`, `nama`, `dept`, `jabatan` | `BINDING_KARTU_MK`, `KARYAWAN` | - | card harus lolos `assertCard()` / `normalizeCard()` |
-| `bindKartu(noKartuMK, nik, loker, lat, lng)` | web `confirmMasuk()`, Android gate | serial kartu, `nik`, `loker`, opsional geo | `ok`, `msg`, binding context | `KARYAWAN`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | `REGISTRASI SAAT MASUK PABRIK`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | memakai `withCardLock()` dan `safeUpdateRecapAbsen()` |
-| `releaseKartu(noKartuMK, loker, lat, lng)` | web `confirmKeluar()`, Android gate | serial kartu, `loker`, opsional geo | `ok`, `msg`, release context | `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | `REGISTRASI SAAT KELUAR PABRIK`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | status kartu harus `BOUND`; keluar bergantung binding aktif |
+| `bindKartu(noKartuMK, nik, loker, lat, lng)` | web `confirmMasuk()` langsung; Android **tidak pernah** langsung, selalu lewat `submitGateRequest` | serial kartu, `nik`, `loker`, opsional geo, `sessionToken` (wajib kalau dipanggil sbg action `doPost()` Android) | `ok`, `msg`, binding context | `KARYAWAN`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | `REGISTRASI SAAT MASUK PABRIK`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | memakai `withCardLock()` dan `safeUpdateRecapAbsen()` |
+| `releaseKartu(noKartuMK, loker, lat, lng)` | web `confirmKeluar()` langsung; Android **tidak pernah** langsung, selalu lewat `submitGateRequest` | serial kartu, `loker`, opsional geo, `sessionToken` (wajib kalau dipanggil sbg action `doPost()` Android) | `ok`, `msg`, release context | `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | `REGISTRASI SAAT KELUAR PABRIK`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | status kartu harus `BOUND`; keluar bergantung binding aktif |
 
 ## Area Kerja
 
@@ -53,7 +54,7 @@ Dokumen ini merangkum kontrak input, output, dependency sheet, dan caller untuk 
 
 | Operation | Caller | Input | Output | Read Sheet | Write Sheet | Dependency Penting |
 |---|---|---|---|---|---|---|
-| `getAbsenReport(nik, deptFilter, periodType, periodValue, page, pageSize, sortBy, sortDir, search)` | web report, Android absen | identitas/filter/periode/paging | `ok`, rows report, summary, pagination | `ABSEN IN OUT MK`, `KARYAWAN`, `JADWAL_SHIFT` | cache jika ada | periode Android bisa di-derive dari `startDate/endDate` oleh `resolveAndroidAbsenPeriod_()` |
+| `getAbsenReport(nik, deptFilter, periodType, periodValue, page, pageSize, search, sort, typeFilter)` | web report, Android `absen_screen.dart` | identitas/filter/periode/paging, `typeFilter` opsional (`'' \| 'internal' \| 'outsource'`, 2026-08-17) | `ok`, rows report, summary, pagination | `ABSEN IN OUT MK`, `KARYAWAN`, `JADWAL_SHIFT` | cache jika ada | periode Android bisa di-derive dari `startDate/endDate` oleh `resolveAndroidAbsenPeriod_()`; vendor admin (PENGAWAS + type VENDOR) mengirim `deptFilter=''` + `typeFilter='outsource'` untuk lihat semua mitra kerja lintas dept, lihat `docs/GAS_ARCHITECTURE.md` domain Report |
 | `getAreaActivityReport(nik, deptFilter, periodType, periodValue, page, pageSize, sortBy, sortDir, search)` | web report area, Android absen | identitas/filter/periode/paging | `ok`, rows activity area, summary, pagination | `REGISTRASI MASUK KELUAR AREA KERJA`, `KARYAWAN` | cache jika ada | data area tidak boleh memperbaiki gate recap sendiri |
 
 ## Jadwal Shift
@@ -75,29 +76,34 @@ Dokumen ini merangkum kontrak input, output, dependency sheet, dan caller untuk 
 
 ```json
 {
-  "apiKey": "DAM_ANDROID_SECURE_KEY_2026",
+  "apiKey": "<nilai Script Property ANDROID_API_KEY, rotatable — lihat getAndroidApiKey_()>",
   "action": "verifyLogin"
 }
 ```
 
+Action mutasi/PII (lihat daftar di bawah, ditandai 🔒) juga wajib field `sessionToken` (diterbitkan `verifyLogin`, divalidasi `requireAndroidSessionToken_()`).
+
 ### Action aktif yang harus dijaga sinkron
 
 - `verifyLogin`
-- `verifySession`
+- `verifySession` (Android: `verifySessionToken_`, bukan lookup NIK)
 - `getBindingStatus`
-- `submitGateRequest`
+- `submitGateRequest` 🔒
 - `getGateRequestStatus`
 - `pingAndroidGateway`
 - `logAndroidDiagnostics`
-- `bindKartu`
-- `releaseKartu`
-- `scanAreaKerja`
+- `bindKartu` 🔒 (Android tidak pernah panggil langsung, selalu via `submitGateRequest`)
+- `releaseKartu` 🔒 (sama seperti `bindKartu`)
+- `scanAreaKerja` 🔒
 - `getDashboardData`
 - `getKehadiranDashboard`
 - `getRecentAreaLogs`
 - `getAreaActivityReport`
-- `getAbsenReport`
+- `getAbsenReport` (+ optional `typeFilter`)
 - `searchKaryawan`
+- `getKaryawanByNIK` 🔒
+
+🔒 = wajib `sessionToken` valid via `requireAndroidSessionToken_()` (ditambahkan 2026-08-17, lihat `docs/ARCHITECTURE_AUDIT_2026-08-17.md`).
 
 ## Sheet Dependency by Domain
 
@@ -112,6 +118,7 @@ Dokumen ini merangkum kontrak input, output, dependency sheet, dan caller untuk 
 | `JADWAL_SHIFT` | planning shift | dashboard kehadiran, jadwal CRUD |
 | `ANDROID_GATE_REQUESTS` | ledger request gate Android | `submitGateRequest()`, `getGateRequestStatus()` |
 | `ANDROID_DIAGNOSTICS` | audit koneksi Android | `logAndroidDiagnostics()` |
+| `ANDROID_SESSIONS` | token session Android (2026-08-17) | `generateSessionToken_()`, `validateSessionToken_()`, `verifySessionToken_()`, `cleanupExpiredAndroidSessions_()` |
 
 ## Quick Troubleshooting by Symptom
 

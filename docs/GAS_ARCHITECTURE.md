@@ -39,7 +39,7 @@ Yang tidak boleh dipakai sebagai sumber arsitektur aktif:
 Proyek ini telah dianalisis menggunakan **Graphify**, yang menghasilkan representasi grafik dari seluruh basis kode, dependensi, dan *workflow*:
 - Direktori `graphify-out/` adalah output lokal hasil generate ulang saat analisis Graphify sedang dibutuhkan.
 - Artifact Graphify tidak lagi dijadikan file permanen di repo aktif supaya hasil graph tidak membawa noise dari snapshot lama atau arsip legacy.
-- Jika perlu, generate ulang dengan `venv\Scripts\python.exe -m graphify scan . --output graphify-out`.
+- Jika perlu, generate ulang dengan `venv\Scripts\python.exe -m graphify update . --no-cluster`.
 - Rincian dependensi otomatis untuk pemanggilan fungsi tingkat rendah, rantai UI, dan ikatan data konseptual didokumentasikan di `docs/NEURAL_MAPPING.md`.
 
 ## Struktur HOME_PORTAL
@@ -148,11 +148,23 @@ Prinsip utamanya:
 - frontend:
   - `restoreSavedSession()`
   - `handleLoginSubmit()`
-- backend:
-  - `verifySession()`
-  - `verifyLogin()`
+- backend (web, via `google.script.run`):
+  - `verifySession(nik)` — lookup by NIK, dipakai web saja
+  - `verifyLogin(nik, password)` — juga menerbitkan `sessionToken` (dipakai Android, diabaikan web)
+- backend (Android, via `doPost()` HTTP, real bearer token — lihat "Auth Android" di bawah):
+  - `verifySessionToken_(token)`
+  - `generateSessionToken_(nik)` / `validateSessionToken_(token)` / `cleanupExpiredAndroidSessions_()`
+  - `requireAndroidSessionToken_(payload)` — guard dipakai `doPost()` untuk action sensitif
 - sheet utama:
   - `KARYAWAN`
+  - `ANDROID_SESSIONS` (token Android, lihat "Auth Android")
+
+**Auth Android (2026-08-17)**: `verifySession(nik)`/`verifyLogin(nik, pwd)` yang dipakai web TETAP lookup by NIK (model lama, tidak diubah supaya web tidak putus). Jalur Android (`doPost()`) memakai mekanisme terpisah:
+- `verifyLogin()` sukses → `generateSessionToken_(nik)` menerbitkan UUID token (TTL 30 hari) disimpan di sheet `ANDROID_SESSIONS`, dikembalikan sebagai field tambahan `sessionToken` (aman untuk web, diabaikan).
+- Action Android `verifySession` di `doPost()` di-route ke `verifySessionToken_(payload.sessionToken)` — verifikasi token nyata, bukan lookup NIK.
+- `doPost()` mewajibkan `sessionToken` valid (via `requireAndroidSessionToken_()`) sebelum menjalankan `bindKartu`, `releaseKartu`, `scanAreaKerja`, `submitGateRequest`, `getKaryawanByNIK`.
+- API key Android (`apiKey`) dibaca dari Script Property `ANDROID_API_KEY` via `getAndroidApiKey_()` (rotatable tanpa deploy ulang), fallback ke literal lama kalau property belum diisi. API key cuma gate identifikasi aplikasi, bukan kredensial kuat — itu peran `sessionToken`.
+- Detail lengkap & rasional scoping (kenapa web tidak disentuh): `docs/ANDROID_GAS_BRIDGE_MAP.md`, `docs/ARCHITECTURE_AUDIT_2026-08-17.md`.
 
 ### 2. Gate / Pabrik
 
@@ -235,8 +247,9 @@ Kontrak domain:
   - `processAbsenReport()`
   - `processAreaReport()`
 - backend:
-  - `getAbsenReport()`
+  - `getAbsenReport(nik, deptFilter, periodType, periodValue, page, pageSize, search, sort, typeFilter)`
   - `getAreaActivityReport()`
+  - `exportAbsenReportCsv(nik, deptFilter, periodType, periodValue, typeFilter)`
 - sheet utama:
   - `ABSEN IN OUT MK`
   - `REGISTRASI MASUK KELUAR AREA KERJA`
@@ -247,6 +260,7 @@ Kontrak domain:
 - `getAbsenReport()` membaca recap yang sudah dibangun ulang.
 - `getAreaActivityReport()` membaca log area yang sudah dinormalisasi.
 - pagination, export, dan tabel render harus berasal dari dataset yang sama.
+- **`typeFilter` (2026-08-17)**: parameter opsional `'' | 'internal' | 'outsource'`, sama pola dengan filter type di `getDashboardData()` (via `isExternalKaryawan()`). Dipakai untuk mode "vendor admin" — lihat catatan `CEK ABSEN` di bawah. Backward compatible; kosong/tidak dikirim = perilaku lama (tanpa filter tipe).
 
 ## Session Management
 
@@ -263,20 +277,30 @@ Kontrak domain:
 
 ### Session Android
 
-- Session Android disimpan di `SharedPreferences` dengan key `user_session`.
-- Payload session Android minimal memuat:
-  - `sessionToken`
+- Session Android disimpan via `flutter_secure_storage` (bukan `SharedPreferences` — diganti 2026-08-17 karena `sessionToken` sekarang kredensial bearer nyata, bukan lagi NIK biasa) dengan key `user_session`.
+- `sessionToken` diterbitkan server (`generateSessionToken_`) saat login, disimpan `ApiService.sessionToken` (static field) dan otomatis dilampirkan ke setiap request `ApiService.post()`.
+- Payload session Android (`SessionModel`) memuat:
+  - `sessionToken` — opaque UUID, bukan NIK
   - `nik`
   - `nama`
   - `departemen`
   - `jabatan`
   - `role`
+  - `type` — TYPE KARYAWAN, dipakai a.l. untuk deteksi `isVendorAdmin` (role PENGAWAS + type VENDOR, lihat domain Report)
 - Kontrak runtime aktif Android:
   - restore local session lebih dulu
   - `AuthWrapper` langsung render `HomeScreen` jika session lokal valid secara struktur
-  - `verifySession()` berjalan di background untuk sinkronisasi data user terbaru
+  - `verifySession` (via `verifySessionToken_` di backend) berjalan di background untuk sinkronisasi data user terbaru
   - kegagalan konektivitas saat bootstrap tidak boleh melempar user kembali ke login
   - logout dan login baru harus menonaktifkan bootstrap/session refresh lama agar tidak terjadi race condition
+  - session Android lama (format pra-2026-08-17, `sessionToken` == NIK) otomatis ditolak `verifySessionToken_` dan jatuh ke alur "sesi tidak valid → login ulang" yang sudah ada — bukan bug, memang expected sekali per upgrade.
+
+### Update Mechanism (Android)
+
+- `lib/services/update_service.dart` mengecek GitHub Releases repo `imannurchaedi-max/ins3009` (`releases/latest` API) saat `HomeScreen` dibuka + tombol manual "Cek Update" di app bar.
+- Rilis baru diterbitkan dengan tag `vX.Y.Z` + asset `.apk` terlampir; app membandingkan tag terhadap `PackageInfo.version` lokal.
+- Kalau ada versi lebih baru: download APK ke direktori sementara, lalu buka installer sistem Android (`open_filex`, butuh permission `REQUEST_INSTALL_PACKAGES`). Tetap ada dialog konfirmasi sistem Android — tidak bisa install sepenuhnya silent tanpa root/MDM.
+- Release APK ditandatangani keystore release khusus (`applicationId` = `com.dayaanugrahmulya.dam_access_control`), bukan debug key — wajib supaya update bisa terpasang menimpa versi lama di device yang sama.
 
 ## Role dan Akses Tab
 
@@ -296,6 +320,7 @@ Catatan `CEK ABSEN`:
 - `KARYAWAN`: wajib isi NIK
 - `SECURITY` dan `ADMINISTRATOR`: NIK opsional
 - `PENGAWAS`: NIK opsional, auto-filter departemen sendiri
+- **Vendor admin (2026-08-17)**: `PENGAWAS` dengan `TYPE KARYAWAN = VENDOR` (`isVendorAdmin` di web `app.html`/Android `SessionModel`) TIDAK di-lock ke departemen sendiri — deptFilter dikosongkan, `typeFilter='outsource'` dipasang otomatis, sehingga bisa lihat/unduh absen semua mitra kerja lintas departemen tapi tidak melihat staf internal. Berlaku di web (report + CSV export) dan Android (`absen_screen.dart`). Setup: set `TYPE KARYAWAN = VENDOR` + `USER LEVEL = PENGAWAS` di sheet `KARYAWAN`, tidak butuh perubahan kode untuk vendor admin baru.
 
 ## Google Sheet yang Dipakai
 
@@ -313,6 +338,8 @@ Catatan `CEK ABSEN`:
   Recap harian turunan dari log masuk/keluar
 - `JADWAL_SHIFT`
   Jadwal shift per karyawan — NIK, shift, tanggal mulai/selesai. Dipakai untuk hitung coverage % per shift di dashboard
+- `ANDROID_SESSIONS`
+  Token session Android (`TOKEN`, `NIK`, `CREATED_AT`, `EXPIRES_AT`) — TTL 30 hari, dibersihkan opportunistically oleh `cleanupExpiredAndroidSessions_()`. Lihat domain Session/Auth.
 - `CONFIG_MODUL`
   Registry URL deployment child modules dan compatibility routing lama, bukan penentu navigasi shell aktif
 

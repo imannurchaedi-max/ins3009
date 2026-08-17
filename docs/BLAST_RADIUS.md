@@ -2,7 +2,9 @@
 
 Dokumen ini memetakan dampak perubahan setiap fungsi backend GAS. Digunakan sebagai panduan sebelum mengedit kode — selalu cek blast radius sebelum memodifikasi fungsi apa pun.
 
-**Acuan**: `reports/function_inventory.md` (202 GAS functions, 354 frontend functions) · Graphify 169 nodes/212 edges · Audit terakhir: 2026-06-23
+**Acuan**: `reports/gas_runtime_comparison.json` (217 GAS functions, 383 frontend functions, 10 sheet constants) · Audit terakhir: 2026-08-17
+
+> Line number di bawah adalah snapshot per audit terakhir dan bisa bergeser seiring edit berikutnya — untuk lokasi/impact analysis presisi terkini, pakai GitNexus (`impact`, `context`) di `.gs`-indexable symbols atau grep langsung, bukan cuma percaya nomor baris di dokumen ini.
 
 ## Risk Level Definition
 
@@ -86,25 +88,54 @@ Dokumen ini memetakan dampak perubahan setiap fungsi backend GAS. Digunakan seba
 
 ---
 
+## Domain: Auth Android (Session Token, ditambahkan 2026-08-17)
+
+Terpisah dari `verifySession(nik)`/`verifyLogin(nik, pwd)` di atas yang tetap dipakai jalur **web**. Jalur Android (`doPost()`) memakai mekanisme token nyata sendiri — lihat `docs/GAS_ARCHITECTURE.md` domain Session/Auth dan `docs/ANDROID_GAS_BRIDGE_MAP.md` untuk kontrak lengkap.
+
+### verifySessionToken_(token) — `SharedLib.gs`
+- **Risk**: CRITICAL
+- **Direct callers**: `Code.js::doPost()` (action `verifySession`, jalur Android saja)
+- **Callees**: `validateSessionToken_()`, `getKaryawanMapByNIK()`, `makeKaryawanPayload()`, `getAvailableDepts()`
+- **Sheets read**: `ANDROID_SESSIONS`, `KARYAWAN`
+- **What breaks**: Restore session Android gagal untuk semua user, atau — kalau logikanya salah dilonggarkan — bisa membuka kembali celah token-bypass yang sebelumnya diperbaiki.
+
+### generateSessionToken_(nik) / validateSessionToken_(token) — `SharedLib.gs`
+- **Risk**: CRITICAL
+- **Direct callers**: `verifyLogin()` (generate, saat login sukses), `verifySessionToken_()` + `requireAndroidSessionToken_()` (validate)
+- **Sheets read/write**: `ANDROID_SESSIONS`
+- **What breaks**: Login Android tidak bisa menerbitkan token (generate) atau semua action Android bergerbang-token jadi selalu ditolak/selalu diterima (validate) — kedua arah berbahaya, salah satu bikin app tidak bisa dipakai, yang lain membuka bypass auth.
+
+### requireAndroidSessionToken_(payload) — `SharedLib.gs`
+- **Risk**: CRITICAL
+- **Direct callers**: `Code.js::doPost()` — guard sebelum dispatch `bindKartu`, `releaseKartu`, `scanAreaKerja`, `submitGateRequest`, `getKaryawanByNIK`
+- **What breaks**: Kalau guard ini rusak/dilewati, action mutasi/PII Android jadi cuma tergantung `apiKey` statis lagi — regresi persis ke Critical finding `docs/ARCHITECTURE_AUDIT_2026-08-17.md`.
+
+### getAndroidApiKey_() — `SharedLib.gs`
+- **Risk**: MEDIUM
+- **Direct callers**: `Code.js::doPost()`
+- **What breaks**: Kalau salah baca Script Property, semua request Android (termasuk yang legit) ditolak "Invalid API Key".
+
+---
+
 ## Domain: Gate — Masuk & Keluar Pabrik
 
-### bindKartu(noKartuMK, nik, loker) — `GateFunctions.gs:98`
+### bindKartu(noKartuMK, nik, loker) — `GateFunctions.gs`
 - **Risk**: HIGH
-- **Frontend callers**: `confirmMasuk()` di HOME_PORTAL:658, MODUL_AREA_KERJA:665, MODUL_GATE_PABRIK:653, MODUL_REPORT:579
-- **Callees**: `withDocumentLock()`, `assertCard()`, `getKaryawanByNIK()`, `nowWIB()`, `formatDate()`, `formatTime()`, `isExternalKaryawan()`, `getFactoryRecapStatus()`, `detectShift()`, `getSheet()`, `safeUpdateRecapAbsen()`, `getBindingStatus()`, `escHtml()`
+- **Frontend callers**: `confirmMasuk()` di HOME_PORTAL, MODUL_AREA_KERJA, MODUL_GATE_PABRIK, MODUL_REPORT (web, via `google.script.run`); Android hanya lewat `submitGateRequest` → `processGateRequestById_()`, **tidak pernah** langsung (lihat `docs/ANDROID_GAS_BRIDGE_MAP.md`)
+- **Callees**: `withCardLock()` (per nomor kartu — **bukan** `withDocumentLock()` global), `assertCard()`, `getKaryawanByNIK()`, `nowWIB()`, `formatDate()`, `formatTime()`, `isExternalKaryawan()`, `getFactoryRecapStatus()`, `detectShift()`, `getSheet()`, `safeUpdateRecapAbsen()`, `getBindingStatus()`, `escHtml()`
 - **Sheets read**: `KARYAWAN`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK`
 - **Sheets write**: `REGISTRASI SAAT MASUK PABRIK`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK`
 - **What breaks**: Karyawan tidak bisa masuk pabrik. Binding kartu gagal. Recap absen tidak terupdate. Seluruh flow MASUK mati.
-- **Notes**: Write path paling kompleks. Dibungkus `withDocumentLock()`. Dependency pada `SHIFT_CONFIG` via `detectShift()`.
+- **Notes**: Write path paling kompleks. Dibungkus `withCardLock()` per-kartu (bukan document lock global — diperbaiki 2026-08-14 supaya kartu berbeda tidak saling antre). Dependency pada `SHIFT_CONFIG` via `detectShift()`. Semua `setValue()` tanggal/jam di sini harus dikunci `setNumberFormat('@')` SEBELUM ditulis (lihat `docs/date-normalization-2026-08-02.md`). Dipanggil lewat `doPost()` Android sekarang wajib `sessionToken` valid.
 
-### releaseKartu(noKartuMK, loker, mode) — `GateFunctions.gs:169`
+### releaseKartu(noKartuMK, loker, mode) — `GateFunctions.gs`
 - **Risk**: HIGH
-- **Frontend callers**: `confirmKeluar()` di HOME_PORTAL:679,792, MODUL_AREA_KERJA:766, MODUL_GATE_PABRIK:674,787, MODUL_REPORT:680
-- **Callees**: `withDocumentLock()`, `assertCard()`, `asText()`, `getKaryawanByNIK()`, `isExternalKaryawan()`, `nowWIB()`, `formatDate()`, `getFactoryRecapStatus()`, `formatTime()`, `detectShift()`, `getSheet()`, `safeUpdateRecapAbsen()`, `formatDateTime()`, `getBindingStatus()`, `getHeaderIndex()`
+- **Frontend callers**: `confirmKeluar()` di HOME_PORTAL, MODUL_AREA_KERJA, MODUL_GATE_PABRIK, MODUL_REPORT (web); Android hanya lewat `submitGateRequest`, sama seperti `bindKartu()`
+- **Callees**: `withCardLock()` (per nomor kartu), `assertCard()`, `asText()`, `getKaryawanByNIK()`, `isExternalKaryawan()`, `nowWIB()`, `formatDate()`, `getFactoryRecapStatus()`, `formatTime()`, `detectShift()`, `getSheet()`, `safeUpdateRecapAbsen()`, `formatDateTime()`, `getBindingStatus()`, `getHeaderIndex()`
 - **Sheets read**: `KARYAWAN`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK`
 - **Sheets write**: `REGISTRASI SAAT KELUAR PABRIK`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK`
 - **What breaks**: Karyawan tidak bisa keluar pabrik. Kartu tetap tertahan status BOUND. Recap absen tidak terupdate.
-- **Notes**: `mode='FORCE_RELEASE'` diblokir sejak FASE 24. Hanya Security yang bisa release via flow terpisah.
+- **Notes**: `mode='FORCE_RELEASE'` diblokir sejak FASE 24. Hanya Security yang bisa release via flow terpisah. Locking sama seperti `bindKartu()` — `withCardLock()` per-kartu. Dipanggil lewat `doPost()` Android sekarang wajib `sessionToken` valid.
 
 ### getBindingStatus(noKartuMK) — `GateFunctions.gs:56`
 - **Risk**: MEDIUM

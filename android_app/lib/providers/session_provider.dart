@@ -59,6 +59,7 @@ class SessionProvider with ChangeNotifier {
           (karyawanJson['dept'] ?? karyawanJson['departemen'] ?? '').toString(),
       jabatan: (karyawanJson['jabatan'] ?? '').toString(),
       role: (karyawanJson['role'] ?? 'KARYAWAN').toString(),
+      type: (karyawanJson['type'] ?? '').toString(),
     );
   }
 

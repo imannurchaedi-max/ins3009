@@ -5,6 +5,7 @@ class SessionModel {
   final String departemen;
   final String jabatan;
   final String role;
+  final String type;
 
   SessionModel({
     required this.sessionToken,
@@ -13,7 +14,13 @@ class SessionModel {
     required this.departemen,
     required this.jabatan,
     required this.role,
+    this.type = '',
   });
+
+  /// PENGAWAS dengan type 'VENDOR' = admin vendor: lihat absen SEMUA mitra
+  /// kerja lintas dept (bukan cuma dept sendiri), dibatasi ke tipe outsource.
+  bool get isVendorAdmin =>
+      role.toUpperCase() == 'PENGAWAS' && type.toUpperCase() == 'VENDOR';
 
   factory SessionModel.fromJson(Map<String, dynamic> json) {
     return SessionModel(
@@ -23,6 +30,7 @@ class SessionModel {
       departemen: json['departemen'] ?? json['dept'] ?? '',
       jabatan: json['jabatan'] ?? '',
       role: json['role'] ?? '',
+      type: json['type'] ?? '',
     );
   }
 
@@ -34,6 +42,7 @@ class SessionModel {
       'departemen': departemen,
       'jabatan': jabatan,
       'role': role,
+      'type': type,
     };
   }
 }

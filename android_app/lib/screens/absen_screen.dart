@@ -52,7 +52,7 @@ class _AbsenScreenState extends State<AbsenScreen> {
     if (role == 'KARYAWAN') {
       _nikController.text = user?.nik ?? '';
     }
-    if (role == 'PENGAWAS') {
+    if (role == 'PENGAWAS' && !(user?.isVendorAdmin ?? false)) {
       _deptController.text = (user?.departemen ?? '').toUpperCase();
     }
   }
@@ -117,11 +117,13 @@ class _AbsenScreenState extends State<AbsenScreen> {
       if (page != null) _currentPage = page;
     });
 
+    final isVendorAdmin = user?.isVendorAdmin ?? false;
+
     final result = await ApiService.post('getAbsenReport', {
       'nik': role == 'KARYAWAN'
           ? (user?.nik ?? '')
           : _nikController.text.trim(),
-      'deptFilter': role == 'PENGAWAS'
+      'deptFilter': (role == 'PENGAWAS' && !isVendorAdmin)
           ? (user?.departemen ?? '')
           : _deptController.text.trim().toUpperCase(),
       'periodType': _periodType,
@@ -130,6 +132,7 @@ class _AbsenScreenState extends State<AbsenScreen> {
       'pageSize': 25,
       'search': _searchController.text.trim(),
       'sort': _sort,
+      'typeFilter': isVendorAdmin ? 'outsource' : '',
     });
 
     if (!mounted) return;
@@ -185,7 +188,8 @@ class _AbsenScreenState extends State<AbsenScreen> {
 
   Widget _buildFilterCard(String role, SessionModel? user) {
     final isKaryawan = role == 'KARYAWAN';
-    final isPengawas = role == 'PENGAWAS';
+    final isVendorAdmin = user?.isVendorAdmin ?? false;
+    final isPengawas = role == 'PENGAWAS' && !isVendorAdmin;
     final nikValue = isKaryawan
         ? (user?.nik ?? '')
         : _nikController.text.trim();
@@ -249,7 +253,9 @@ class _AbsenScreenState extends State<AbsenScreen> {
                       prefixIcon: const Icon(Icons.apartment),
                       helperText: isPengawas && user != null
                           ? 'Terkunci ke dept ${user.departemen}'
-                          : null,
+                          : (isVendorAdmin
+                              ? 'Semua departemen - khusus mitra kerja (kosongkan atau isi untuk filter satu dept)'
+                              : null),
                     ),
                   ),
                   const SizedBox(height: 12),

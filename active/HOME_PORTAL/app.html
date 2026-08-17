@@ -271,6 +271,15 @@ function beginModuleAutoLogin(sessionNik) {
 }
 
 // ── AUTHENTICATION ─────────────────────────────────────────
+
+// PENGAWAS dengan TYPE KARYAWAN 'VENDOR' = admin vendor: butuh lihat absen
+// SEMUA mitra kerja lintas dept (bukan cuma dept sendiri seperti PENGAWAS
+// biasa), tapi tetap dibatasi ke tipe outsource saja (tidak lihat staf internal).
+function isVendorPengawas_() {
+  const user = STATE.currentUser;
+  return !!(user && user.role === 'PENGAWAS' && (user.type || '').toString().trim().toUpperCase() === 'VENDOR');
+}
+
 function applyRolePermissions(role) {
   const TABS = {
     'masuk': ['ADMINISTRATOR', 'SECURITY', 'KARYAWAN'],
@@ -1847,7 +1856,9 @@ function processAbsenReport(pageOverride) {
   REPORT_CACHE.absen = null;
   if (exportBtn) exportBtn.disabled = true;
   const role = STATE.currentUser ? STATE.currentUser.role : '';
-  const deptFilter = role === 'PENGAWAS' ? STATE.currentUser.dept : '';
+  const vendorAdmin = isVendorPengawas_();
+  const deptFilter = (role === 'PENGAWAS' && !vendorAdmin) ? STATE.currentUser.dept : '';
+  const typeFilter = vendorAdmin ? 'outsource' : '';
 
   // KARYAWAN wajib isi NIK (hanya bisa lihat data sendiri)
   // SECURITY / ADMINISTRATOR / PENGAWAS boleh kosong (lihat semua)
@@ -1872,7 +1883,7 @@ function processAbsenReport(pageOverride) {
       window.clearTimeout(slowTimer);
       renderAbsenReport(res);
     })
-    .getAbsenReport(nik, deptFilter, periodType, periodValue, page, pageSize, search, sort);
+    .getAbsenReport(nik, deptFilter, periodType, periodValue, page, pageSize, search, sort, typeFilter);
 }
 
 function buildAbsenPaginationControls(currentPage, totalPages) {
@@ -2018,9 +2029,11 @@ function exportAbsenReport() {
   const rawNik = normalizeSerial(document.getElementById('cek-absen-nik').value);
   const filenameNik = rawNik || 'SEMUA';
   const role = STATE.currentUser ? STATE.currentUser.role : '';
-  const deptFilter = role === 'PENGAWAS'
+  const vendorAdmin = isVendorPengawas_();
+  const deptFilter = (role === 'PENGAWAS' && !vendorAdmin)
     ? (STATE.currentUser && STATE.currentUser.dept ? STATE.currentUser.dept : '')
     : '';
+  const typeFilter = vendorAdmin ? 'outsource' : '';
   const periodType = document.getElementById('cek-absen-period-type').value;
   const periodValue = document.getElementById('cek-absen-period-value').value || 'PERIODE';
 
@@ -2041,7 +2054,7 @@ function exportAbsenReport() {
       );
       showResult('cek-absen', 'success', `CSV berhasil disiapkan untuk periode ${escHtml(res.period || report.period || periodValue)}.`);
     })
-    .exportAbsenReportCsv(rawNik, deptFilter, periodType, periodValue);
+    .exportAbsenReportCsv(rawNik, deptFilter, periodType, periodValue, typeFilter);
 }
 
 function csvCell(value) {

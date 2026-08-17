@@ -321,7 +321,8 @@ function doPost(e) {
           payload.page,
           payload.pageSize,
           payload.search,
-          payload.sort
+          payload.sort,
+          payload.typeFilter
         );
         break;
       case 'searchKaryawan':

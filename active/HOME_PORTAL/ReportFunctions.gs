@@ -88,14 +88,14 @@ function buildPaginationMeta_(totalRows, page, pageSize) {
 }
 
 // ── Absen Report (Rekap masuk/keluar pabrik) ──────────────
-function getAbsenReport(nik, deptFilter, periodType, periodValue, page, pageSize, search, sort) {
+function getAbsenReport(nik, deptFilter, periodType, periodValue, page, pageSize, search, sort, typeFilter) {
   try {
     const targetNik = asText(nik).trim();
     const filterDpt = asText(deptFilter).trim();
     // Boleh kosong jika admin/security (tampil semua data periode)
     const reportPage = parseInt(page, 10) || 1;
     const reportPageSize = parseInt(pageSize, 10) || DEFAULT_REPORT_PAGE_SIZE;
-    const fullReport = getAbsenReportFullData_(targetNik, filterDpt, periodType, periodValue);
+    const fullReport = getAbsenReportFullData_(targetNik, filterDpt, periodType, periodValue, typeFilter);
     if (!fullReport.ok) return fullReport;
 
     let rows = fullReport.rows;
@@ -172,9 +172,9 @@ function getAbsenReport(nik, deptFilter, periodType, periodValue, page, pageSize
   }
 }
 
-function exportAbsenReportCsv(nik, deptFilter, periodType, periodValue) {
+function exportAbsenReportCsv(nik, deptFilter, periodType, periodValue, typeFilter) {
   try {
-    const report = getAbsenReportFullData_(nik, deptFilter, periodType, periodValue);
+    const report = getAbsenReportFullData_(nik, deptFilter, periodType, periodValue, typeFilter);
     if (!report.ok) return report;
 
     const rows = [
@@ -300,9 +300,10 @@ function getAreaActivityReport(nik, deptFilter, periodType, periodValue, page, p
   }
 }
 
-function getAbsenReportFullData_(nik, deptFilter, periodType, periodValue) {
+function getAbsenReportFullData_(nik, deptFilter, periodType, periodValue, typeFilter) {
   const targetNik = asText(nik).trim();
   const filterDpt = asText(deptFilter).trim();
+  const filterType = asText(typeFilter).trim().toLowerCase();  // '' | 'internal' | 'outsource'
   const range    = getPeriodRange(periodType, periodValue);
   const sheet   = getSheet(SHEET_RECAP_ABSEN);
   const lastRow = sheet.getLastRow();
@@ -311,6 +312,7 @@ function getAbsenReportFullData_(nik, deptFilter, periodType, periodValue) {
     return { ok: true, period: range.label, total: 0, complete: 0, active: 0, rows: [] };
   }
 
+  const karyawanMap = filterType ? getKaryawanMapByNIK() : null;
   const rangeValues = sheet.getRange(2, 1, lastRow - 1, width);
   const rawData     = rangeValues.getValues();
   const data        = rangeValues.getDisplayValues();
@@ -327,8 +329,15 @@ function getAbsenReportFullData_(nik, deptFilter, periodType, periodValue) {
     if (!dateKey || dateKey < startKey || dateKey > endKey) continue;
     const rowNik  = asText(row[1]).trim();
     const rowDept = asText(row[3]).trim();
+    const rowJabatan = asText(row[4]).trim();
     if (targetNik && rowNik !== targetNik) continue;
     if (filterDpt && rowDept !== filterDpt) continue;
+    if (filterType) {
+      const master = karyawanMap[rowNik] || {};
+      const isExternal = isExternalKaryawan({ type: master.type, dept: rowDept, jabatan: rowJabatan });
+      if (filterType === 'internal' && isExternal) continue;
+      if (filterType === 'outsource' && !isExternal) continue;
+    }
     const status = asText(row[7]);
     if (status === 'SELESAI') complete++;
     if (status === 'DI DALAM') active++;

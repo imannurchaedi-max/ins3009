@@ -23,6 +23,11 @@ class ApiService {
   static HttpClient? _sharedClient;
   static bool _diagnosticsFlushInFlight = false;
 
+  /// Real per-user session token issued by verifyLogin(), set by SessionProvider.
+  /// Sent on every request so backend can gate sensitive actions (bindKartu,
+  /// releaseKartu, scanAreaKerja, submitGateRequest, getKaryawanByNIK).
+  static String? sessionToken;
+
   /// Sends a POST request to the Google Apps Script doPost endpoint.
   ///
   /// Apps Script `/exec` endpoints accept the initial POST, then redirect to a
@@ -189,6 +194,7 @@ class ApiService {
       final Map<String, dynamic> requestBody = {
         'apiKey': ApiConfig.apiKey,
         'action': action,
+        if (sessionToken != null) 'sessionToken': sessionToken,
         ...payload, // spread all fields at root level
       };
 

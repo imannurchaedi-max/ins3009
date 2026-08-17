@@ -12,25 +12,32 @@ Dokumen ini sengaja dibuat untuk membantu maintenance koneksi Android ↔ Google
 ## Bridge Flow Utama
 
 1. Flutter memanggil `ApiService.post(action, payload)`.
-2. `ApiService` mengirim JSON ke URL Apps Script `exec`.
-3. `Code.js::doPost()` memvalidasi `apiKey`, membaca `action`, lalu meneruskan request ke fungsi GAS domain terkait.
+2. `ApiService` mengirim JSON ke URL Apps Script `exec`, menyertakan `sessionToken` (jika ada) secara otomatis untuk semua action.
+3. `Code.js::doPost()` memvalidasi `apiKey`, membaca `action`, lalu meneruskan request ke fungsi GAS domain terkait — action mutasi/PII (lihat bagian Auth) juga divalidasi `sessionToken`-nya sebelum dispatch.
 4. Fungsi GAS membaca/menulis Google Sheet sesuai domain.
 5. Android menerima JSON response; jika koneksi gagal, telemetry lokal tetap disimpan oleh `AndroidDiagnosticsService`.
+
+## Auth
+
+- **API key** (`apiKey`) — gate identifikasi aplikasi, dibaca lewat `getAndroidApiKey_()` dari Script Property `ANDROID_API_KEY` (fallback ke literal lama bila property belum diisi). Bukan rahasia kuat (bisa diekstrak dari APK) — bukan itu yang mengamankan mutasi data.
+- **Session token** (`sessionToken`) — kredensial nyata untuk Android. Diterbitkan `generateSessionToken_()` saat `verifyLogin()` sukses (UUID, TTL 30 hari, disimpan di sheet `ANDROID_SESSIONS`), lalu disimpan Android via `flutter_secure_storage` dan otomatis dilampirkan `ApiService` ke setiap request (`ApiService.sessionToken`).
+  - `verifySession` (action Android) → `verifySessionToken_(token)` — verifikasi token nyata terhadap `ANDROID_SESSIONS`, **bukan** lookup by NIK.
+  - Action yang **wajib** `sessionToken` valid (via `requireAndroidSessionToken_()` di `doPost()`): `bindKartu`, `releaseKartu`, `scanAreaKerja`, `submitGateRequest`, `getKaryawanByNIK`.
+  - Session lama/kadaluarsa dibersihkan opportunistically oleh `cleanupExpiredAndroidSessions_()`.
+  - Catatan: `verifySession(nik)`/`verifyLogin(nik, pwd)` di `SharedLib.gs` juga dipakai jalur **web** (`google.script.run`, terpisah dari `doPost()`) — jalur web tidak memakai `sessionToken` Android ini, tetap dengan model session `dam_session` (localStorage) yang sudah ada. Lihat `docs/ARCHITECTURE_AUDIT_2026-08-17.md` untuk detail keputusan scoping ini.
 
 ## Action Matrix
 
 | Android caller | Action | GAS handler | Read Sheet | Write Sheet | Catatan |
 |---|---|---|---|---|---|
-| `session_provider.dart` | `verifyLogin` | `verifyLogin()` | `KARYAWAN` | - | login awal |
-| `session_provider.dart` | `verifySession` | `verifySession()` | `KARYAWAN` | - | restore session optimistis |
+| `session_provider.dart` | `verifyLogin` | `verifyLogin()` (menerbitkan `sessionToken` via `generateSessionToken_()`) | `KARYAWAN`, `ANDROID_SESSIONS` | `ANDROID_SESSIONS` | login awal |
+| `session_provider.dart` | `verifySession` | `verifySessionToken_()` (verifikasi token nyata, bukan lookup by NIK) | `ANDROID_SESSIONS`, `KARYAWAN` | - | restore session optimistis |
 | `gate_screen.dart` | `getBindingStatus` | `getBindingStatus()` | `BINDING_KARTU_MK`, `KARYAWAN`, `ABSEN IN OUT MK` | - | precheck kartu |
-| `gate_screen.dart` | `submitGateRequest` | `submitGateRequest()` | `ANDROID_GATE_REQUESTS`, domain gate terkait | `ANDROID_GATE_REQUESTS`, domain gate terkait | request gate idempotent |
+| `gate_screen.dart` | `submitGateRequest` (`requestAction: 'bindKartu'`\|`'releaseKartu'`) | `submitGateRequest()` → `processGateRequestById_()` → `bindKartu()`/`releaseKartu()` | `ANDROID_GATE_REQUESTS`, `KARYAWAN`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK`, domain gate terkait | `ANDROID_GATE_REQUESTS`, `REGISTRASI SAAT MASUK/KELUAR PABRIK`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | request gate idempotent — `gate_screen.dart` **tidak pernah** kirim action `bindKartu`/`releaseKartu` langsung, selalu lewat queue ini. `bindKartu`/`releaseKartu` sebagai action `doPost()` tersendiri tetap ada untuk jalur web (`google.script.run`); dipanggil lewat HTTP Android butuh `sessionToken` valid |
 | `gate_screen.dart` | `getGateRequestStatus` | `getGateRequestStatus()` | `ANDROID_GATE_REQUESTS` | - | polling recovery |
-| `gate_screen.dart` | `bindKartu` | `bindKartu()` | `KARYAWAN`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | `REGISTRASI SAAT MASUK PABRIK`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | tetap dipakai oleh web; Android normalnya lewat queue |
-| `gate_screen.dart` | `releaseKartu` | `releaseKartu()` | `BINDING_KARTU_MK`, `ABSEN IN OUT MK`, `KARYAWAN` | `REGISTRASI SAAT KELUAR PABRIK`, `BINDING_KARTU_MK`, `ABSEN IN OUT MK` | tetap fungsi mutasi inti |
-| `area_screen.dart` | `scanAreaKerja` | `scanAreaKerja()` | `BINDING_KARTU_MK`, `KARYAWAN`, `REGISTRASI MASUK KELUAR AREA KERJA`, `ABSEN IN OUT MK` | `REGISTRASI MASUK KELUAR AREA KERJA` | scan area kerja |
-| `dashboard_screen.dart` | `getDashboardData` | `getDashboardData()` | `ABSEN IN OUT MK`, `REGISTRASI MASUK KELUAR AREA KERJA`, `KARYAWAN` | - | dashboard operasional |
-| `dashboard_screen.dart` | `getKehadiranDashboard` | `getKehadiranDashboard()` | `ABSEN IN OUT MK`, `KARYAWAN`, `JADWAL_SHIFT` | cache script | dashboard kehadiran |
+| `gate_screen.dart` | `getKaryawanByNIK` | `getKaryawanByNIK()` | `KARYAWAN` | - | lookup NIK untuk operator; butuh `sessionToken` valid |
+| `area_screen.dart` | `scanAreaKerja` | `scanAreaKerja()` | `BINDING_KARTU_MK`, `KARYAWAN`, `REGISTRASI MASUK KELUAR AREA KERJA`, `ABSEN IN OUT MK` | `REGISTRASI MASUK KELUAR AREA KERJA` | scan area kerja; butuh `sessionToken` valid |
+| `dashboard_screen.dart` | `getKehadiranDashboard` | `getKehadiranDashboard()` | `ABSEN IN OUT MK`, `KARYAWAN`, `JADWAL_SHIFT` | cache script | dashboard kehadiran (satu-satunya action dashboard yang dipanggil `dashboard_screen.dart` — `getDashboardData` tidak dipakai Android) |
 | `area_screen.dart` | `getRecentAreaLogs` | `getRecentAreaLogs()` | `REGISTRASI MASUK KELUAR AREA KERJA` | - | recent area logs |
 | `absen_screen.dart` | `getAbsenReport` | `getAbsenReport()` | `ABSEN IN OUT MK`, `KARYAWAN`, `JADWAL_SHIFT` | cache script | report absen |
 | `absen_screen.dart` | `getAreaActivityReport` | `getAreaActivityReport()` | `REGISTRASI MASUK KELUAR AREA KERJA`, `KARYAWAN` | cache script | report area |

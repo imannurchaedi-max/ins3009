@@ -114,7 +114,8 @@ User / Browser
   - `releaseKartu()`
   - `updateRecapAbsen()` via helper internal
 - Shared dependency:
-  - `withDocumentLock()`
+  - `withCardLock()` — per-kartu, dipakai `bindKartu()`/`releaseKartu()` (bukan `withDocumentLock()` global)
+  - `withCardLock()` keyed per `NIK+tanggal` — dipakai `updateRecapAbsen()`
   - `getFactoryRecapStatus()`
   - `getKaryawanByNIK()`
 - Sheet utama:
@@ -578,13 +579,16 @@ Semua akses sheet lewat `getSheet()` dan `ensureHeader()`. Artinya:
 
 ### 3. Locking Menjadi Guard untuk Write Path
 
-Write path utama dibungkus `withDocumentLock()`:
+Write path utama dibungkus lock, tapi tidak semua pakai `withDocumentLock()` (global) —
+sebagian besar sudah pindah ke `withCardLock()` (per-kartu/per-key, tidak saling antre):
 
-- `bindKartu()` — gate masuk
-- `releaseKartu()` — gate keluar
-- `scanAreaKerja()` — scan area
-- `saveJadwalShift()` — upsert jadwal
-- `deleteJadwalShift()` — hapus jadwal
+- `bindKartu()` — `withCardLock()` per nomor kartu
+- `releaseKartu()` — `withCardLock()` per nomor kartu
+- `scanAreaKerja()` — `withCardLock()` per nomor kartu
+- `updateRecapAbsen()` — `withCardLock()` keyed per `NIK+tanggal`
+- `submitGateRequest()`/`processGateRequestById_()` (jalur Android) — `withGateRequestQueueLock_()`, memakai mekanisme `withCardLock()` dengan key `'GRQ_' + requestId`
+- `saveJadwalShift()` — `withDocumentLock()` (global, masih dipakai — operasi jadwal jarang & tidak butuh isolasi per-kartu)
+- `deleteJadwalShift()` — `withDocumentLock()` (global, sama seperti di atas)
 
 Kalau locking rusak, race condition akan langsung memukul binding, recap, log area, dan data jadwal.
 

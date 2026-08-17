@@ -16,6 +16,7 @@ const SHEET_RECAP_ABSEN       = 'ABSEN IN OUT MK';
 const SHEET_JADWAL            = 'JADWAL_SHIFT';
 const SHEET_GATE_REQUESTS     = 'ANDROID_GATE_REQUESTS';
 const SHEET_ANDROID_DIAGNOSTICS = 'ANDROID_DIAGNOSTICS';
+const SHEET_ANDROID_SESSIONS  = 'ANDROID_SESSIONS';
 
 const SHEET_HEADERS = {
   [SHEET_KARYAWAN]: ['NIK','NAMA','TYPE KAYARAWAN','DEPT','JABATAN','USER LEVEL','PASSWORD'],
@@ -26,7 +27,8 @@ const SHEET_HEADERS = {
   [SHEET_RECAP_ABSEN]: ['TANGGAL','NIK','NAMA','DEPARTEMEN','JABATAN','JAM MASUK','JAM KELUAR','STATUS','NO KARTU MK','NO LOKER'],
   [SHEET_JADWAL]: ['NIK','NAMA','DEPT','SHIFT','TANGGAL_MULAI','TANGGAL_SELESAI'],
   [SHEET_GATE_REQUESTS]: ['REQUEST_ID','ACTION','PARTITION_KEY','NO_KARTU_MK','NIK','STATUS','CREATED_AT','UPDATED_AT','ATTEMPT_COUNT','PAYLOAD_JSON','RESPONSE_JSON','LAST_ERROR'],
-  [SHEET_ANDROID_DIAGNOSTICS]: ['EVENT_ID','EVENT_AT','RECEIVED_AT','SOURCE','ACTION','PHASE','OUTCOME','FAILURE_KIND','REQUEST_ID','HTTP_STATUS','LATENCY_MS','MESSAGE','NIK','ROLE','DEVICE_SESSION_ID','PAYLOAD_JSON']
+  [SHEET_ANDROID_DIAGNOSTICS]: ['EVENT_ID','EVENT_AT','RECEIVED_AT','SOURCE','ACTION','PHASE','OUTCOME','FAILURE_KIND','REQUEST_ID','HTTP_STATUS','LATENCY_MS','MESSAGE','NIK','ROLE','DEVICE_SESSION_ID','PAYLOAD_JSON'],
+  [SHEET_ANDROID_SESSIONS]: ['TOKEN','NIK','CREATED_AT','EXPIRES_AT']
 };
 
 const OPTIONAL_SHEET_HEADERS = {
@@ -1474,7 +1476,8 @@ function verifyLogin(nik, password) {
     return {
       ok: true,
       karyawan: makeKaryawanPayload(k),
-      depts: getAvailableDepts(karyawanMap)
+      depts: getAvailableDepts(karyawanMap),
+      sessionToken: generateSessionToken_(nik)
     };
   } catch(e) {
     return { ok: false, msg: e.message };
@@ -1498,6 +1501,124 @@ function verifySession(nik) {
   } catch(e) {
     return { ok: false, msg: e.message };
   }
+}
+
+// ---- ANDROID SESSION TOKEN (real bearer token, bukan lookup by NIK) ----
+
+const ANDROID_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 hari
+
+/**
+ * Terbitkan session token baru untuk NIK yang berhasil login, simpan di
+ * SHEET_ANDROID_SESSIONS. Dipanggil dari verifyLogin() — dipakai jalur Android saja,
+ * jalur web (google.script.run) tetap memakai verifySession(nik) seperti sebelumnya.
+ */
+function generateSessionToken_(nik) {
+  const token = Utilities.getUuid();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + ANDROID_SESSION_TTL_MS);
+  const sheet = getSheet(SHEET_ANDROID_SESSIONS);
+  sheet.appendRow([token, asText(nik).trim(), now.toISOString(), expiresAt.toISOString()]);
+
+  // Sweep sesekali (bukan setiap login) supaya sheet tidak tumbuh tanpa batas.
+  if (Math.random() < 0.05) {
+    try { cleanupExpiredAndroidSessions_(); } catch(e) {
+      Logger.log('SharedLib.generateSessionToken_: cleanup gagal — ' + e.message);
+    }
+  }
+
+  return token;
+}
+
+/**
+ * Hapus baris session yang sudah lewat EXPIRES_AT dari SHEET_ANDROID_SESSIONS.
+ */
+function cleanupExpiredAndroidSessions_() {
+  const sheet = getSheet(SHEET_ANDROID_SESSIONS);
+  const data = sheet.getDataRange().getValues();
+  const now = new Date();
+  const rowsToDelete = [];
+
+  for (let i = 1; i < data.length; i++) {
+    const expiresAt = new Date(data[i][3]);
+    if (isNaN(expiresAt.getTime()) || expiresAt.getTime() < now.getTime()) {
+      rowsToDelete.push(i + 1); // 1-indexed sheet row
+    }
+  }
+
+  for (let j = rowsToDelete.length - 1; j >= 0; j--) {
+    sheet.deleteRow(rowsToDelete[j]);
+  }
+}
+
+/**
+ * Validasi token bearer Android terhadap SHEET_ANDROID_SESSIONS.
+ * @returns {{nik: string}|null}
+ */
+function validateSessionToken_(token) {
+  const target = asText(token).trim();
+  if (!target) return null;
+
+  const sheet = getSheet(SHEET_ANDROID_SESSIONS);
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (asText(data[i][0]).trim() !== target) continue;
+
+    const expiresAt = new Date(data[i][3]);
+    if (isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()) {
+      return null;
+    }
+    return { nik: asText(data[i][1]).trim() };
+  }
+  return null;
+}
+
+/**
+ * Verifikasi session Android yang sesungguhnya (verifikasi token, bukan lookup by NIK).
+ * Dipakai khusus oleh Code.js::doPost() action 'verifySession' untuk Android.
+ */
+function verifySessionToken_(token) {
+  try {
+    const validated = validateSessionToken_(token);
+    if (!validated) {
+      return { ok: false, msg: 'Sesi tidak valid atau kadaluarsa, silakan login ulang.' };
+    }
+
+    const karyawanMap = getKaryawanMapByNIK();
+    const k = karyawanMap[validated.nik];
+    if (!k) {
+      return { ok: false, msg: 'NIK tidak ditemukan di database.' };
+    }
+
+    return {
+      ok: true,
+      karyawan: makeKaryawanPayload(k),
+      depts: getAvailableDepts(karyawanMap)
+    };
+  } catch(e) {
+    return { ok: false, msg: e.message };
+  }
+}
+
+/**
+ * Guard dipakai doPost() sebelum menjalankan action mutasi/PII Android
+ * (bindKartu, releaseKartu, scanAreaKerja, submitGateRequest, getKaryawanByNIK).
+ */
+function requireAndroidSessionToken_(payload) {
+  const validated = validateSessionToken_(payload && payload.sessionToken);
+  if (!validated) {
+    return { ok: false, msg: 'Sesi tidak valid atau kadaluarsa, silakan login ulang.' };
+  }
+  return { ok: true };
+}
+
+/**
+ * API key Android — dibaca dari Script Properties supaya bisa dirotasi tanpa
+ * deploy ulang kode. Fallback ke literal lama agar deployment existing tidak putus
+ * sebelum Script Property 'ANDROID_API_KEY' diisi.
+ */
+function getAndroidApiKey_() {
+  const stored = PropertiesService.getScriptProperties().getProperty('ANDROID_API_KEY');
+  return stored || 'DAM_ANDROID_SECURE_KEY_2026';
 }
 
 // ---- GAS TEMPLATE ----

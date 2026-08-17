@@ -33,10 +33,12 @@ node .gitnexus/run.cjs list
 
 ```bash
 venv\Scripts\python.exe -m graphify --help
-venv\Scripts\python.exe -m graphify scan . --output graphify-out
+venv\Scripts\python.exe -m graphify update . --no-cluster
 venv\Scripts\python.exe -m graphify query "login" --graph graphify-out/graph.json
 venv\Scripts\python.exe -m graphify.serve --help
 ```
+
+> `graphify scan . --output graphify-out` sudah tidak berjalan di environment saat ini — command yang terverifikasi berhasil adalah `graphify update . --no-cluster` (lihat `docs/ARCHITECTURE_AUDIT_2026-08-17.md`).
 
 ### Deploy Apps Script
 

@@ -217,7 +217,7 @@ function resolveAndroidAbsenPeriod_(payload) {
 }
 
 function doPost(e) {
-  const API_KEY = 'DAM_ANDROID_SECURE_KEY_2026'; // Harus sama dengan config di app Flutter
+  const API_KEY = getAndroidApiKey_(); // Rotatable via Script Property 'ANDROID_API_KEY'
 
   try {
     if (!e || !e.postData || !e.postData.contents) {
@@ -240,14 +240,17 @@ function doPost(e) {
         result = verifyLogin(payload.nik, payload.password);
         break;
       case 'verifySession':
-        result = verifySession(payload.sessionToken || payload.nik);
+        result = verifySessionToken_(payload.sessionToken);
         break;
       case 'getBindingStatus':
         result = getBindingStatus(payload.noKartuMK);
         break;
-      case 'submitGateRequest':
+      case 'submitGateRequest': {
+        const sessionCheckSGR = requireAndroidSessionToken_(payload);
+        if (!sessionCheckSGR.ok) { result = sessionCheckSGR; break; }
         result = submitGateRequest(payload);
         break;
+      }
       case 'getGateRequestStatus':
         result = getGateRequestStatus(payload.requestId);
         break;
@@ -257,17 +260,26 @@ function doPost(e) {
       case 'logAndroidDiagnostics':
         result = logAndroidDiagnostics(payload);
         break;
-      case 'bindKartu':
+      case 'bindKartu': {
+        const sessionCheckBind = requireAndroidSessionToken_(payload);
+        if (!sessionCheckBind.ok) { result = sessionCheckBind; break; }
         result = bindKartu(payload.noKartuMK, payload.nik, payload.loker, payload.lat, payload.lng);
         break;
-      case 'releaseKartu':
+      }
+      case 'releaseKartu': {
+        const sessionCheckRelease = requireAndroidSessionToken_(payload);
+        if (!sessionCheckRelease.ok) { result = sessionCheckRelease; break; }
         result = releaseKartu(payload.noKartuMK, payload.loker, payload.lat, payload.lng);
         break;
-      case 'scanAreaKerja':
+      }
+      case 'scanAreaKerja': {
+        const sessionCheckScan = requireAndroidSessionToken_(payload);
+        if (!sessionCheckScan.ok) { result = sessionCheckScan; break; }
         result = scanAreaKerja(payload.noKartuMK, payload.tujuan, payload.catatan, payload.forceMode);
         break;
+      }
       case 'getDashboardData':
-        result = getDashboardData(payload.basis, payload.basisValue, payload.deptFilter, payload.typeFilter);
+        result = getDashboardData(payload.basis, payload.basisValue, payload.deptFilter, payload.typeFilter, payload.basisDate);
         break;
       case 'getKehadiranDashboard':
         result = getKehadiranDashboard(
@@ -315,12 +327,15 @@ function doPost(e) {
       case 'searchKaryawan':
         result = searchKaryawan(payload.query);
         break;
-      case 'getKaryawanByNIK':
+      case 'getKaryawanByNIK': {
+        const sessionCheckLookup = requireAndroidSessionToken_(payload);
+        if (!sessionCheckLookup.ok) { result = sessionCheckLookup; break; }
         var karyawan = getKaryawanByNIK(payload.nik);
         result = karyawan
           ? { ok: true, karyawan: makeKaryawanPayload(karyawan) }
           : { ok: false, msg: 'NIK tidak ditemukan: ' + asText(payload.nik).trim() };
         break;
+      }
       default:
         result = { ok: false, msg: 'Action not mapped: ' + action };
     }

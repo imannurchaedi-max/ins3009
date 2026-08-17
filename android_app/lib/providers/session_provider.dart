@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/session_model.dart';
 import '../services/api_service.dart';
 
 class SessionProvider with ChangeNotifier {
+  static const _secureStorage = FlutterSecureStorage();
+
   SessionModel? _session;
   bool _isLoading = true;
   int _sessionVersion = 0;
@@ -19,14 +21,14 @@ class SessionProvider with ChangeNotifier {
   }
 
   Future<void> _loadSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    final sessionJson = prefs.getString('user_session');
+    final sessionJson = await _secureStorage.read(key: 'user_session');
 
     if (sessionJson != null) {
       try {
         final restoredSession = SessionModel.fromJson(jsonDecode(sessionJson));
         final restoreVersion = ++_sessionVersion;
         _session = restoredSession;
+        ApiService.sessionToken = restoredSession.sessionToken;
         _isLoading = false;
         notifyListeners();
 
@@ -36,7 +38,7 @@ class SessionProvider with ChangeNotifier {
         ));
         return;
       } catch (e) {
-        await _clearSession(prefs: prefs, notify: false);
+        await _clearSession(notify: false);
       }
     }
     _isLoading = false;
@@ -46,10 +48,11 @@ class SessionProvider with ChangeNotifier {
   SessionModel _buildSessionFromKaryawan(
     Map<String, dynamic> karyawanJson, {
     required String fallbackNik,
+    required String sessionToken,
   }) {
     final nik = (karyawanJson['nik'] ?? fallbackNik).toString();
     return SessionModel(
-      sessionToken: nik,
+      sessionToken: sessionToken,
       nik: nik,
       nama: (karyawanJson['nama'] ?? '').toString(),
       departemen:
@@ -61,18 +64,19 @@ class SessionProvider with ChangeNotifier {
 
   Future<void> _persistSession() async {
     if (_session == null) return;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_session', jsonEncode(_session!.toJson()));
+    await _secureStorage.write(
+      key: 'user_session',
+      value: jsonEncode(_session!.toJson()),
+    );
   }
 
   Future<void> _clearSession({
-    SharedPreferences? prefs,
     bool notify = true,
   }) async {
     _session = null;
     _isLoading = false;
-    final targetPrefs = prefs ?? await SharedPreferences.getInstance();
-    await targetPrefs.remove('user_session');
+    ApiService.sessionToken = null;
+    await _secureStorage.delete(key: 'user_session');
     if (notify) {
       notifyListeners();
     }
@@ -116,6 +120,7 @@ class SessionProvider with ChangeNotifier {
       _session = _buildSessionFromKaryawan(
         result['karyawan'] as Map<String, dynamic>,
         fallbackNik: existing.nik,
+        sessionToken: existing.sessionToken,
       );
       await _persistSession();
       notifyListeners();
@@ -141,14 +146,15 @@ class SessionProvider with ChangeNotifier {
     });
 
     if (result['ok'] == true) {
-      // GAS verifyLogin mengembalikan { ok: true, karyawan: { nik, nama, dept, jabatan, role, ... } }
-      // BUKAN 'user' dan BUKAN 'sessionToken'
+      // GAS verifyLogin mengembalikan { ok: true, karyawan: {...}, depts: [...], sessionToken }
       final karyawanJson = result['karyawan'] as Map<String, dynamic>;
       _sessionVersion++;
       _session = _buildSessionFromKaryawan(
         karyawanJson,
         fallbackNik: nik,
+        sessionToken: (result['sessionToken'] ?? '').toString(),
       );
+      ApiService.sessionToken = _session!.sessionToken;
       _isLoading = false;
       await _persistSession();
     }

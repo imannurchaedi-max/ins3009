@@ -845,6 +845,7 @@ function handleSecurityScan(res) {
 function loadDashboard() {
   const dashboardBasis = (STATE.dashboard && STATE.dashboard.basis) || 'today';
   const dashboardValue = getDashboardBasisValue(dashboardBasis);
+  const dashboardShiftDate = dashboardBasis === 'shift' ? getDashboardShiftDateValue() : '';
   const deptFilter = (document.getElementById('db-dept-filter') || {}).value || '';
   const typeFilter = (document.getElementById('db-type-filter') || {}).value || '';
 
@@ -1110,7 +1111,7 @@ function loadDashboard() {
       // Muat kehadiran dashboard (untuk KPI terlambat/lembur/anomali)
       loadKehadiranDashboard();
     })
-    .getDashboardData(dashboardBasis, dashboardValue, deptFilter, typeFilter);
+    .getDashboardData(dashboardBasis, dashboardValue, deptFilter, typeFilter, dashboardShiftDate);
 }
 
 function selectDashboardArea(areaLabel) {
@@ -1221,6 +1222,10 @@ function getDashboardBasisValue(basis) {
     return document.getElementById('db-month-value')?.value || STATE.dashboard.monthValue || getDefaultPeriodValue('month');
   }
   return '';
+}
+
+function getDashboardShiftDateValue() {
+  return document.getElementById('db-date-value')?.value || STATE.dashboard.dateValue || getDefaultPeriodValue('date');
 }
 
 function updateDashboardFilterControls() {

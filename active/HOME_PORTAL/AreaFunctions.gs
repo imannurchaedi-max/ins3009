@@ -92,7 +92,7 @@ function scanAreaKerja(noKartuMK, tujuan, catatan, forceMode) {
 }
 
 // ── Dashboard Data ────────────────────────────────────────
-function getDashboardData(basis, basisValue, deptFilter, typeFilter) {
+function getDashboardData(basis, basisValue, deptFilter, typeFilter, basisDate) {
   try {
     // FIX B-2: toDateKey() inner function dihapus — konflik dengan global toDateKey di ReportFunctions.gs
     // Gunakan formatDateForSort() langsung di mana diperlukan (sudah dipakai di buildDateTimeKey di bawah)
@@ -168,6 +168,7 @@ function getDashboardData(basis, basisValue, deptFilter, typeFilter) {
       let metricHint = 'Snapshot operasional dihitung dari recap status DI DALAM dan log area pada basis waktu yang dipilih.';
       let shiftLabel = '';
       const valueText = asText(basisValue).trim();
+      const dateText = asText(basisDate).trim();
 
       if (mode === 'date') {
         const pickedDate = parseIsoDate(valueText) || today;
@@ -177,7 +178,7 @@ function getDashboardData(basis, basisValue, deptFilter, typeFilter) {
         periodLabel = formatDateUI(start);
         metricHint = 'Snapshot operasional memakai recap status DI DALAM pada tanggal yang dipilih.';
       } else if (mode === 'shift') {
-        const pickedDate = parseIsoDate(valueText) || today;
+        const pickedDate = parseIsoDate(dateText) || today;
         start.setTime(new Date(pickedDate.getFullYear(), pickedDate.getMonth(), pickedDate.getDate()).getTime());
         end.setTime(start.getTime());
         const selectedShift = asText(valueText).trim().toLowerCase();
@@ -662,7 +663,7 @@ function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter, opt
       }
 
       // Filter shift
-      if (shiftF && shiftLabel && shiftLabel !== shiftF) return;
+      if (shiftF && shiftLabel !== shiftF) return;
 
       // Format jam
       const jamMasukStr  = jamMasuk  ? (Object.prototype.toString.call(jamMasuk)  === '[object Date]' ? Utilities.formatDate(jamMasuk,  'Asia/Jakarta', 'HH:mm') : asText(jamMasuk).substring(0,5))  : '';
@@ -682,12 +683,13 @@ function getKehadiranDashboard(tanggal, shiftFilter, deptFilter, typeFilter, opt
 
       if (status === 'DI DALAM') {
         presenceStatus = 'di_dalam';
-        // Cek apakah sudah terlalu lama
+        // Cek apakah sudah terlalu lama — dihitung dari targetDate, bukan cuma jam sekarang,
+        // supaya dashboard tanggal historis tidak salah ukur terhadap jam hari ini.
         if (jamMasukStr) {
           const masukMins = timeStrToMinutes(jamMasukStr);
-          const nowMins   = now.getHours() * 60 + now.getMinutes();
-          let diffMins = nowMins - masukMins;
-          if (diffMins < 0) diffMins += 24 * 60;  // wrap midnight
+          const masukDateTime = new Date(targetDate);
+          masukDateTime.setHours(Math.floor(masukMins / 60), masukMins % 60, 0, 0);
+          const diffMins = Math.floor((now.getTime() - masukDateTime.getTime()) / 60000);
           if (diffMins > ANOMALI_MAX_HOURS * 60) {
             anomali.push('DI_DALAM_TERLALU_LAMA');
           }

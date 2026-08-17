@@ -2,7 +2,7 @@
 
 Daftar lengkap semua fungsi backend (GAS) dan frontend di project EMPLOYEE TRACKER. Gunakan sebagai index pencarian cepat saat ingin menemukan atau memperbaiki fungsi tertentu.
 
-**Acuan**: `reports/function_inventory.md` (202 GAS functions, 354 frontend functions) · Audit terakhir: 2026-08-03
+**Acuan**: `reports/gas_runtime_comparison.json` (217 GAS functions, 382 frontend functions, 20 unique frontend GAS calls, 10 sheet constants) · Audit terakhir: 2026-08-17
 
 ---
 
@@ -386,5 +386,5 @@ Daftar lengkap semua fungsi backend (GAS) dan frontend di project EMPLOYEE TRACK
 
 ---
 
-**Last updated**: 2026-08-11  
-**Data source**: `reports/function_inventory.md`, `docs/NEURAL_MAPPING.md`, hasil GitNexus, dan Graphify lokal bila diregenerate
+**Last updated**: 2026-08-17  
+**Data source**: `reports/gas_runtime_comparison.json`, `reports/function_inventory.md`, `docs/NEURAL_MAPPING.md`, hasil GitNexus, dan Graphify lokal bila diregenerate

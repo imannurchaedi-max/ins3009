@@ -200,6 +200,11 @@ function saveJadwalShift(nik, shift, tanggalMulai, tanggalSelesai) {
         const rowShift = asText(data[i][3]).trim();
         if (rowNik === nikNorm && rowShift === shiftNorm) {
           const rowNum = i + 1;
+          // Kunci format '@' SEBELUM setValues — kalau kebalik, Sheets auto-convert
+          // string dd/MM/yyyy jadi Date beneran dan mengunci format sesudahnya tidak
+          // menuliskan ulang value-nya (pola sama seperti WAKTU_BIND di GateFunctions.gs).
+          applyNumberFormatToCell_(sheet, rowNum, 5, '@');
+          applyNumberFormatToCell_(sheet, rowNum, 6, '@');
           sheet.getRange(rowNum, 1, 1, 6).setValues([[
             nikNorm, nama, dept, shiftNorm,
             formatDate(mulaiDate),
@@ -209,14 +214,21 @@ function saveJadwalShift(nik, shift, tanggalMulai, tanggalSelesai) {
         }
       }
 
-      // Belum ada → append
+      // Belum ada → append, lalu kunci format '@' dan tulis ulang kolom tanggal —
+      // appendRow() bisa saja sudah membuat Sheets auto-convert tanggal jadi Date
+      // beneran sebelum baris ini sempat mengunci formatnya.
       sheet.appendRow([
         nikNorm, nama, dept, shiftNorm,
         formatDate(mulaiDate),
         selesaiDate ? formatDate(selesaiDate) : ''
       ]);
+      const newRowNum = sheet.getLastRow();
+      applyNumberFormatToCell_(sheet, newRowNum, 5, '@');
+      sheet.getRange(newRowNum, 5).setValue(formatDate(mulaiDate));
+      applyNumberFormatToCell_(sheet, newRowNum, 6, '@');
+      sheet.getRange(newRowNum, 6).setValue(selesaiDate ? formatDate(selesaiDate) : '');
 
-      return { ok: true, msg: 'Jadwal ' + nama + ' (' + shiftNorm + ') ditambahkan.', rowIndex: sheet.getLastRow() };
+      return { ok: true, msg: 'Jadwal ' + nama + ' (' + shiftNorm + ') ditambahkan.', rowIndex: newRowNum };
     } catch(e) {
       return { ok: false, msg: e.message };
     }

@@ -51,3 +51,30 @@ scan yang aktif di jam operasional pabrik. Nonaktifkan lewat menu
 *🌙 Nonaktifkan Auto-Repair Malam Hari* bila perlu. Trigger harus dipasang
 manual sekali lewat menu (bukan auto-install di `onOpen`) karena pembuatan
 trigger butuh otorisasi OAuth yang tidak bisa diminta dari simple trigger.
+
+## Update 2026-08-17 — dua sisa titik drift yang belum ke-cover fix 08-14
+
+Audit ulang menemukan pola bug yang sama (tulis value dulu, baru kunci format
+`@`) masih ada di dua tempat yang tidak tersentuh fix sebelumnya (fix 08-14
+hanya menyasar `GateFunctions.gs`):
+
+1. `DataRepairUtils.gs::rewriteFactoryRecapSheet_()` — bulk rewrite kolom
+   `JAM MASUK`/`JAM KELUAR` di `ABSEN IN OUT MK` lewat `setValues()` sebelum
+   `setNumberFormat('@')` dikunci. Fungsi ini dipanggil dari menu manual
+   *Repair Shift Log Masuk/Keluar* **dan** dari job auto-repair jam 02:00 —
+   jadi job pengaman itu sendiri bisa menyuntik ulang drift format jam yang
+   sama ke seluruh sheet recap tiap malam. Diperbaiki: kunci `'@'` pada kedua
+   range (TANGGAL, JAM MASUK/KELUAR) sebelum `setValues()`.
+2. `JadwalFunctions.gs::saveJadwalShift()` — menulis `TANGGAL_MULAI`/
+   `TANGGAL_SELESAI` di `JADWAL_SHIFT` sebagai string `dd/MM/yyyy` tanpa
+   `setNumberFormat('@')` sama sekali (sheet ini memang tidak pernah masuk
+   daftar guardrail di atas). Diperbaiki: kunci `'@'` sebelum `setValues`
+   (path update) dan tulis-ulang setelah kunci `'@'` pasca-`appendRow` (path
+   insert baru), pola sama seperti fix `GateFunctions.gs`.
+
+Modul kompatibilitas (`MODUL_GATE_PABRIK`, `MODUL_AREA_KERJA`, `MODUL_REPORT`)
+diverifikasi **tidak terpengaruh** — ketiganya sekarang murni redirector
+HTML ke `HOME_PORTAL` (`Code.js` masing-masing cuma `doGet()` redirect),
+tidak ada satupun write ke sheet lewat jalur itu. `SharedLib.gs` versi lama
+yang masih ada di masing-masing modul kompat adalah dead code, tidak
+terpanggil dari entry point manapun.

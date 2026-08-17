@@ -610,10 +610,13 @@ function rewriteFactoryRecapSheet_(rows, options) {
     sheetRecap.getRange(2, 1, recapLastRow - 1, recapWidth).clearContent();
   }
   if (finalRows.length > 0) {
-    sheetRecap.getRange(2, 1, finalRows.length, recapWidth).setValues(finalRows);
-    // Plain text for date and time columns so locale cannot reformat
+    // Kunci format '@' SEBELUM setValues — kalau kebalik, Sheets auto-convert
+    // string tanggal/jam jadi Date/Time beneran saat ditulis, dan mengunci format
+    // sesudahnya tidak menuliskan ulang value-nya (pola sama seperti bug
+    // WAKTU_BIND/WAKTU_RELEASE di GateFunctions.gs — lihat docs/date-normalization-2026-08-02.md).
     sheetRecap.getRange(2, 1, finalRows.length, 1).setNumberFormat('@');  // TANGGAL
     sheetRecap.getRange(2, 6, finalRows.length, 2).setNumberFormat('@');  // JAM MASUK / JAM KELUAR
+    sheetRecap.getRange(2, 1, finalRows.length, recapWidth).setValues(finalRows);
   }
   return finalRows.length;
 }

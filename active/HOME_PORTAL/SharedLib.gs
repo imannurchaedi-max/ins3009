@@ -820,6 +820,24 @@ function normalizeTimeValue(value) {
   }
 }
 
+// Sel tanggal boleh berupa objek Date asli (peninggalan sebelum sel dikunci '@')
+// atau teks ISO/dd-MM-yyyy. Selalu kembalikan teks ISO 'yyyy-MM-dd' yang aman
+// ditampilkan, supaya asText() tidak jatuh ke Date.toString() bawaan JS
+// (pola bug sama seperti normalizeTimeValue di atas).
+function normalizeDateDisplayValue_(value, parseOptions) {
+  try {
+    if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
+      return formatDateISO(value);
+    }
+    const parsed = parseSheetDate(value, parseOptions);
+    if (parsed) return formatDateISO(parsed);
+    return asText(value).trim();
+  } catch(e) {
+    Logger.log('SharedLib.normalizeDateDisplayValue_: failed - ' + e.message);
+    return asText(value).trim();
+  }
+}
+
 function compareTimeValues(a, b) {
   const minuteA = timeStrToMinutes(a);
   const minuteB = timeStrToMinutes(b);

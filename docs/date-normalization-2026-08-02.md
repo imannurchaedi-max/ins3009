@@ -78,3 +78,37 @@ HTML ke `HOME_PORTAL` (`Code.js` masing-masing cuma `doGet()` redirect),
 tidak ada satupun write ke sheet lewat jalur itu. `SharedLib.gs` versi lama
 yang masih ada di masing-masing modul kompat adalah dead code, tidak
 terpanggil dari entry point manapun.
+
+## Update 2026-08-18 — nightly auto-repair merusak balik TANGGAL/JAM `REGISTRASI MASUK KELUAR AREA KERJA`
+
+Ditemukan saat trial: log Area Kerja lama tampil kacau di Android/web
+(`Sat Dec 30 1899 19:01:25 GMT+0707...`) padahal baris hasil scan hari yang
+sama tampil normal. Root cause: `scanAreaKerja()` (`AreaFunctions.gs`) sudah
+menulis TANGGAL/JAM sebagai teks polos dikunci `@` sejak fix sebelumnya, tapi
+`normalizeFactoryTemporalColumns_()` (`DataRepairUtils.gs`, dipanggil job
+auto-repair jam 02:00) memakai `normalizeTemporalColumn_` **mode Date** untuk
+kolom TANGGAL sheet ini — setiap malam job ini mengonversi teks ISO yang
+sudah aman itu balik jadi objek Date asli, membatalkan kuncian `@`. Kolom JAM
+di sheet yang sama malah tidak pernah disentuh sama sekali oleh repair
+malam, jadi baris lama yang masih Date-typed tidak pernah diperbaiki.
+`getRecentAreaLogs()` lalu memakai `asText()` polos yang jatuh ke
+`Date.toString()` bawaan JS untuk sel bertipe Date — itu sumber teks kacau
+di UI.
+
+Diperbaiki:
+- `SharedLib.gs::normalizeDateDisplayValue_()` (baru) — formatter aman untuk
+  sel tanggal yang mungkin Date asli atau teks, selalu mengembalikan ISO
+  `yyyy-MM-dd`. Dipasangkan dengan `normalizeTimeValue()` yang sudah ada
+  untuk kolom jam.
+- `AreaFunctions.gs::getRecentAreaLogs()` — pakai kedua formatter di atas
+  untuk kolom TANGGAL/JAM alih-alih `asText()` polos.
+- `DataRepairUtils.gs::normalizeTemporalColumnAsText_()` (baru, generic) —
+  varian teks dari `normalizeTemporalColumn_` yang mengunci `@` **sebelum**
+  `setValues()` dan tidak pernah mengonversi ke objek Date. Dipakai untuk
+  kolom TANGGAL **dan** JAM `REGISTRASI MASUK KELUAR AREA KERJA` di
+  `normalizeFactoryTemporalColumns_()`, menggantikan varian mode-Date lama.
+
+Baris lama yang sudah kadung Date-typed sebelum fix ini akan otomatis
+ternormalisasi ke teks ISO pada run auto-repair malam berikutnya (atau lewat
+menu manual *Fix & Clean All Spreadsheet Errors*) — tidak perlu migrasi
+manual terpisah.

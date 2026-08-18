@@ -30,6 +30,19 @@ class _AreaScreenState extends State<AreaScreen> {
     'PRODUKSI',
     'PACKING',
     'OFFICE',
+    'GUDANG FINISH GOOD',
+    'AREA CACAH',
+    'UTILITY',
+  ];
+
+  String? _selectedReason;
+  final List<String> _listReason = <String>[
+    'Istirahat',
+    'Toilet',
+    'Sholat',
+    'Klinik',
+    'Pekerjaan',
+    'Lainnya',
   ];
 
   Future<String?> _openCameraScanner({
@@ -56,10 +69,15 @@ class _AreaScreenState extends State<AreaScreen> {
       _statusColor = Colors.blue;
     });
 
+    final sourceNote = 'Scan dari Android App ($sourceLabel)';
+    final catatan = (_selectedReason != null && _selectedReason!.isNotEmpty)
+        ? '$_selectedReason - $sourceNote'
+        : sourceNote;
+
     final result = await ApiService.post('scanAreaKerja', {
       'noKartuMK': cardCode,
       'tujuan': _selectedTujuan,
-      'catatan': 'Scan dari Android App ($sourceLabel)',
+      'catatan': catatan,
       'forceMode': false,
     });
 
@@ -216,6 +234,28 @@ class _AreaScreenState extends State<AreaScreen> {
                 _selectedTujuan = newValue!;
               });
             },
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Keperluan / Catatan (opsional, terutama saat keluar)',
+            style: TextStyle(fontSize: 13, color: Colors.black54),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _listReason.map((String reason) {
+              final selected = _selectedReason == reason;
+              return ChoiceChip(
+                label: Text(reason),
+                selected: selected,
+                onSelected: (bool value) {
+                  setState(() {
+                    _selectedReason = value ? reason : null;
+                  });
+                },
+              );
+            }).toList(),
           ),
           const SizedBox(height: 24),
           Container(

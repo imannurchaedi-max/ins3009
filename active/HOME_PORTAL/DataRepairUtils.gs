@@ -259,6 +259,54 @@ function normalizeTemporalColumn_(sheetName, columnIndex, mode, numberFormat, pa
   };
 }
 
+// AREA_KERJA TANGGAL/JAM ditulis scanAreaKerja() sebagai teks polos dikunci '@'
+// (lihat AreaFunctions.gs) — BUKAN objek Date + number format seperti kolom
+// tanggal lain di fungsi ini. normalizeTemporalColumn_ (mode Date) akan
+// mengubah teks itu balik jadi objek Date asli setiap kali repair malam
+// jalan, membatalkan kuncian '@' dan memicu bug tampilan tanggal/jam kacau
+// di getRecentAreaLogs (lihat docs/date-normalization-2026-08-02.md).
+// Gunakan normalizer berbasis teks supaya konsisten dengan cara tulisnya.
+function normalizeTemporalColumnAsText_(sheetName, columnIndex, formatter) {
+  const sheet = getSheet(sheetName);
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return { normalizedCount: 0, sampleRows: [] };
+
+  const range = sheet.getRange(2, columnIndex, lastRow - 1, 1);
+  const values = range.getValues();
+  let changed = false;
+  let normalizedCount = 0;
+  const sampleRows = [];
+
+  for (let i = 0; i < values.length; i++) {
+    const rawValue = values[i][0];
+    if (rawValue === '' || rawValue === null || rawValue === undefined) continue;
+
+    const normalizedText = formatter(rawValue);
+    if (!normalizedText) continue;
+
+    const isRawDate = rawValue instanceof Date;
+    if (!isRawDate && asText(rawValue) === normalizedText) continue;
+
+    values[i][0] = normalizedText;
+    changed = true;
+    normalizedCount++;
+
+    if (sampleRows.length < 10) {
+      sampleRows.push({ rowNumber: i + 2, beforeValue: asText(rawValue), afterValue: normalizedText });
+    }
+  }
+
+  // Kunci format '@' SEBELUM setValues — kalau kebalik, Sheets auto-convert
+  // string tanggal/jam jadi Date/Time beneran saat ditulis (pola sama seperti
+  // bug WAKTU_BIND/WAKTU_RELEASE di GateFunctions.gs).
+  range.setNumberFormat('@');
+  if (changed) {
+    range.setValues(values);
+  }
+
+  return { normalizedCount: normalizedCount, sampleRows: sampleRows };
+}
+
 function normalizeFactoryTemporalColumns_() {
   const operationalParseOptions = getFactoryOperationalDateParsingOptions_();
   const flexibleDateOptions = normalizeDateParseOptions_({
@@ -268,7 +316,10 @@ function normalizeFactoryTemporalColumns_() {
   const result = {
     masukDates: normalizeTemporalColumn_(SHEET_MASUK_PABRIK, 4, 'date', 'dd/MM/yyyy', operationalParseOptions),
     keluarDates: normalizeTemporalColumn_(SHEET_KELUAR_PABRIK, 4, 'date', 'dd/MM/yyyy', operationalParseOptions),
-    areaDates: normalizeTemporalColumn_(SHEET_AREA_KERJA, 3, 'date', 'dd/MM/yyyy', operationalParseOptions),
+    areaDates: normalizeTemporalColumnAsText_(SHEET_AREA_KERJA, 3, function(value) {
+      return normalizeDateDisplayValue_(value, operationalParseOptions);
+    }),
+    areaTimes: normalizeTemporalColumnAsText_(SHEET_AREA_KERJA, 4, normalizeTimeValue),
     recapDates: normalizeTemporalColumn_(SHEET_RECAP_ABSEN, 1, 'date', 'dd/MM/yyyy', operationalParseOptions),
     bindingBind: normalizeTemporalColumn_(SHEET_BINDING, 6, 'datetime', 'dd/MM/yyyy HH:mm:ss', operationalParseOptions),
     bindingRelease: normalizeTemporalColumn_(SHEET_BINDING, 8, 'datetime', 'dd/MM/yyyy HH:mm:ss', operationalParseOptions),
@@ -280,6 +331,7 @@ function normalizeFactoryTemporalColumns_() {
     (result.masukDates.normalizedCount || 0) +
     (result.keluarDates.normalizedCount || 0) +
     (result.areaDates.normalizedCount || 0) +
+    (result.areaTimes.normalizedCount || 0) +
     (result.recapDates.normalizedCount || 0) +
     (result.bindingBind.normalizedCount || 0) +
     (result.bindingRelease.normalizedCount || 0) +

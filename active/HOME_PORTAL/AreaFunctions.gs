@@ -827,11 +827,18 @@ function getRecentAreaLogs(limit) {
     const n     = Math.max(1, Math.min(parseInt(limit, 10) || 30, 100));
     const sheet = getSheet(SHEET_AREA_KERJA);
     const data  = sheet.getDataRange().getValues();
+    const parseOptions = getFactoryOperationalDateParsingOptions_();
     const rows  = [];
     for (let i = data.length - 1; i >= 1 && rows.length < n; i--) {
       rows.push({
+        // FIX: baris lama (sebelum TANGGAL/JAM dikunci '@') masih menyimpan
+        // objek Date asli — asText() lama men-stringify itu pakai
+        // Date.toString() bawaan JS dan menghasilkan teks kacau
+        // ("Sat Dec 30 1899 19:01:25 GMT+0707..."). Formatter di bawah aman
+        // untuk keduanya (Date asli maupun teks yang sudah dikunci).
         noKartuMK: normalizeCard(data[i][0]), inout:  asText(data[i][1]),
-        tanggal:   asText(data[i][2]),        jam:    asText(data[i][3]),
+        tanggal:   normalizeDateDisplayValue_(data[i][2], parseOptions),
+        jam:       normalizeTimeValue(data[i][3]),
         nik:       asText(data[i][4]),        nama:   asText(data[i][5]),
         tujuan:    asText(data[i][6]),        catatan:asText(data[i][7])
       });

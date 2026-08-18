@@ -43,6 +43,7 @@ Jangan gunakan path berikut sebagai source of truth arsitektur aktif:
 - Update `/docs` when runtime behavior, bridge behavior, or maintenance flow changes.
 - End each completed work cycle with a git commit so the repository state stays current with the implemented result.
 - After modifying runtime code under `active/`, run `npm run deploy` unless explicitly told not to.
+- After modifying Android frontend code under `android_app/lib/`, always rebuild the APK (`flutter build apk` from `android_app/`) unless explicitly told not to — GAS deploy does not update anything bundled into the installed app. Tell the user the build is ready and that they still need to install it on the device; do not assume `npm run deploy` covers Android changes.
 - Use Python or Node tooling from `scripts/` only when you are auditing, deploying, comparing, or generating reports.
 - Do not delete files without confirmation unless the user explicitly asks for cleanup.
 
@@ -74,7 +75,7 @@ Notes:
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **ins3009** (1433 symbols, 2610 relationships, 112 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **ins3009** (1494 symbols, 2727 relationships, 118 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

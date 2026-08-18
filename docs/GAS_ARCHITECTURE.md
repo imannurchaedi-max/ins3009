@@ -222,6 +222,8 @@ Kontrak domain:
 - log area tidak boleh memperbaiki log gate.
 - scan area hanya valid jika karyawan masih `DI DALAM` menurut alur gate/recap.
 - force mode hanya memaksa arah event area, bukan mengubah histori gate.
+- **Daftar area kanonik (2026-08-18)**: `GUDANG MATERIAL`, `PRODUKSI`, `PACKING`, `OFFICE`, `GUDANG FINISH GOOD`, `AREA CACAH`, `UTILITY` — dipakai identik di dropdown "SET AREA" web (`Index.html`) dan dropdown per-scan Android (`area_screen.dart`) supaya kedua platform menulis label yang sama ke `REGISTRASI MASUK KELUAR AREA KERJA` (sebelumnya dua daftar berbeda tanpa sumber kebenaran tunggal — lihat `docs/date-normalization-2026-08-02.md` §2026-08-18). Kolom `catatan` (parameter ke-3 `scanAreaKerja`) diisi dari chip "Keperluan/Catatan" (Istirahat/Toilet/Sholat/Klinik/Pekerjaan/Lainnya) di kedua platform.
+- TANGGAL/JAM di `REGISTRASI MASUK KELUAR AREA KERJA` wajib tetap teks polos dikunci `@` — lihat guardrail di `docs/date-normalization-2026-08-02.md`. Jangan tambahkan normalizer baru yang mengonversi kolom ini ke objek Date.
 
 ### 4. Jadwal Shift
 

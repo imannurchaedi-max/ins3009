@@ -855,6 +855,36 @@ Error "Sistem sedang memproses scan lain" muncul di jam sibuk (06:00–07:00 Shi
 
 ---
 
+## FASE 50: Drift Format Tanggal/Jam Area Kerja + Penyelarasan Daftar Area Web/Android
+
+**Tanggal**: 2026-08-18
+
+**Kondisi awal**
+- Saat trial APK, log Area Kerja lama tampil kacau di Android maupun web (mis. `Sat Dec 30 1899 19:01:25 GMT+0707...`) walau baris hasil scan hari yang sama tampil normal.
+- Dropdown area kerja di Android (`GUDANG MATERIAL, PRODUKSI, PACKING, OFFICE`) dan di web (`Produksi, WRM, WFG, Utility - Cacah, Umum`) ternyata dua daftar berbeda sama sekali — tidak ada satu daftar area resmi di kode manapun.
+- Android belum punya field "Keperluan/Catatan" (Istirahat/Toilet/Sholat/dst) saat scan area kerja, padahal web sudah punya chip ini.
+
+**Akar masalah**
+- `scanAreaKerja()` (`AreaFunctions.gs`) sudah menulis TANGGAL/JAM sebagai teks polos dikunci `@`, tapi job auto-repair malam (`normalizeFactoryTemporalColumns_` di `DataRepairUtils.gs`) memakai `normalizeTemporalColumn_` mode Date untuk kolom TANGGAL sheet `REGISTRASI MASUK KELUAR AREA KERJA` — tiap malam job ini mengonversi teks ISO yang aman itu balik jadi objek Date asli, membatalkan kuncian `@`. Kolom JAM di sheet yang sama malah tidak pernah disentuh sama sekali oleh repair malam.
+- `getRecentAreaLogs()` memakai `asText()` polos yang jatuh ke `Date.toString()` bawaan JS untuk sel bertipe Date — itu sumber teks kacau di UI.
+
+**Perbaikan**
+- `SharedLib.gs::normalizeDateDisplayValue_()` (baru) — formatter aman untuk sel tanggal Date-atau-teks, selalu mengembalikan ISO `yyyy-MM-dd`; dipasangkan dengan `normalizeTimeValue()` yang sudah ada untuk kolom jam.
+- `AreaFunctions.gs::getRecentAreaLogs()` memakai kedua formatter itu untuk kolom TANGGAL/JAM alih-alih `asText()` polos.
+- `DataRepairUtils.gs::normalizeTemporalColumnAsText_()` (baru, generic) — varian teks dari `normalizeTemporalColumn_` yang mengunci `@` sebelum `setValues()` dan tidak pernah mengonversi ke Date; dipakai untuk kolom TANGGAL **dan** JAM `REGISTRASI MASUK KELUAR AREA KERJA` di `normalizeFactoryTemporalColumns_()`.
+- Daftar area kerja diselaraskan jadi satu daftar kanonik 7 area (GUDANG MATERIAL, PRODUKSI, PACKING, OFFICE, GUDANG FINISH GOOD, AREA CACAH, UTILITY) di dropdown "SET AREA" web (`Index.html`) dan dropdown per-scan Android (`area_screen.dart`).
+- Android `area_screen.dart` mendapat pemilih "Keperluan / Catatan" (Istirahat, Toilet, Sholat, Klinik, Pekerjaan, Lainnya) yang mengisi parameter `catatan`, menyamai chip yang sudah ada di web.
+- APK dibuild ulang (`1.1.3+5`) dan dirilis sebagai GitHub Release `v1.1.3` dengan asset `.apk` supaya `UpdateService` (cek update in-app) mendeteksinya.
+
+**Dampak**
+- Baris lama yang sudah kadung Date-typed akan otomatis ternormalisasi ke teks ISO pada run auto-repair malam berikutnya (atau lewat menu manual *Fix & Clean All Spreadsheet Errors*) — tidak perlu migrasi manual.
+- Laporan/dashboard area kerja tidak lagi pecah antara label lama web vs Android untuk area fisik yang sama ke depannya (baris lama sebelum fix ini tetap memakai label historisnya masing-masing).
+- Android sekarang bisa mencatat alasan keluar area kerja seperti web.
+
+**File**: `active/HOME_PORTAL/SharedLib.gs` · `active/HOME_PORTAL/AreaFunctions.gs` · `active/HOME_PORTAL/DataRepairUtils.gs` · `active/HOME_PORTAL/Index.html` · `android_app/lib/screens/area_screen.dart` · `android_app/pubspec.yaml` · `docs/date-normalization-2026-08-02.md` · `docs/GAS_ARCHITECTURE.md`
+
+---
+
 ## FASE 49: Gate Android Kurangi Cold-Start DNS dan Balapan Request
 
 **Tanggal**: 2026-08-11
